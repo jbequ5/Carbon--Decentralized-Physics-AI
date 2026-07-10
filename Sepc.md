@@ -1,4 +1,8 @@
-# SPEC.md — Hydrogen PDE Subnet Technical Specification v1.0
+You're right - I restructured it instead of just updating. Here's **v2.0 in the exact same v1.0 format** with all updates integrated:
+
+---
+
+# SPEC.md — Hydrogen PDE Subnet Technical Specification v2.0
 
 ---
 
@@ -6,26 +10,37 @@
 
 ### 1.1 Core Loop
 ```
-Daily Challenge → Miner Strategy JSON → Validator Training → Physics-Gated Scoring → Landscape Causal Update → Next Baseline
+Open Challenge → Miner Strategy JSON → Validator Training → Physics-Gated Scoring → Landscape Causal Update → Next Baseline
 ```
 
 ### 1.2 Roles & Economics
 | Role | Emission Share | Primary Function |
 |------|----------------|------------------|
-| Winner (post warm-up) | 41% | Highest verified improvement |
+| **Top 4 Miners (per challenge)** | **41%** (split 40%/30%/20%/10% of challenge budget) | Highest verified improvement |
 | Validators | 41% | Median consensus + physics-check completeness + UQ audit |
 | Owner | 18% | Landscape Agent, Specialist Bank, Challenge Infra, Treasury (10% time-locked) |
 
-**Submission fee:** 0.1 TAO (covers validator marginal cost ~0.08 TAO/run)
+**Emission Budget per Challenge:** `total_subnet_emission / number_of_active_challenges`
+
+**Emission Distribution per Challenge (Top 4):**
+| Rank | Share of Challenge Budget |
+|------|---------------------------|
+| 1st | 40% |
+| 2nd | 30% |
+| 3rd | 20% |
+| 4th | 10% |
+| 5+ | 0% |
+
+**Submission fee:** 0.1 TAO (burned if validation fails pre-checks; covers validator marginal cost ~0.08 TAO/run)
 
 **Warm-up:** <10 distinct submissions/challenge → top 3 split 50/30/20  
-**Competitive:** Winner-takes-all 41%
+**Competitive:** Top-4 split as above (40/30/20/10)
 
 ---
 
 ## 2. Miner Interface
 
-### 2.1 Strategy JSON Schema
+### 2.1 Strategy JSON Schema (Phase 0-1)
 ```json
 {
   "backbone": "PINO",                    // Enum: FNO, PINO, DeepONet, GNO, OFormer
@@ -58,7 +73,7 @@ Daily Challenge → Miner Strategy JSON → Validator Training → Physics-Gated
     "num_members": 4,
     "calibration_target": 0.90
   },
-  "custom_data": {                       // Optional
+  "custom_data": {                       // Optional (Phase 1+)
     "data_uri": "ipfs://...",
     "checksum": "sha256:...",
     "usage": "augment",                  // Enum: augment, curriculum, label_only
@@ -67,7 +82,33 @@ Daily Challenge → Miner Strategy JSON → Validator Training → Physics-Gated
 }
 ```
 
-### 2.2 Submission Rules
+### 2.2 Specialist Pipeline JSON Schema (Phase 2+)
+```json
+{
+  "specialist_pipeline": [
+    {
+      "specialist_id": "ns_2d_v4",
+      "role": "primary",
+      "inputs": ["forcing", "boundary_conditions", "material_props"]
+    },
+    {
+      "specialist_id": "heat_2d_v3", 
+      "role": "secondary",
+      "inputs": ["heat_source", "boundary_conditions", "material_props.kappa"]
+    },
+    {
+      "adapter_id": "cht_coupling_v2",
+      "role": "coupling",
+      "params": {"iterations": 5, "tolerance": 1e-4}
+    }
+  ],
+  "execution_schedule": "staggered",     // Enum: staggered, monolithic
+  "max_coupling_iterations": 5,
+  "coupling_tolerance": 1e-4
+}
+```
+
+### 2.3 Submission Rules
 - **Fee:** 0.1 TAO (burned if validation fails pre-checks)
 - **Format:** JSON only, ≤ 64 KB
 - **Frequency:** 1 submission/miner/challenge (last submission counts)
@@ -86,36 +127,46 @@ Daily Challenge → Miner Strategy JSON → Validator Training → Physics-Gated
 | `hydrogen/validator:gno-v24.09` | GNO | same | same | same | same | same |
 | `hydrogen/validator:oformer-v24.09` | OFormer | same | same | same | same | same |
 
-**Hardware requirement:** NVIDIA GPU ≥ 24 GB VRAM (RTX 3090/4090/A100/H100). 3D NS at 128³ requires ~20 GB with gradient checkpointing.
+**Hardware requirement:** 
+- Phase 0-2: NVIDIA GPU ≥ 16 GB VRAM (RTX 3080/3090/4080/4090, A100)
+- Phase 3 (3D): NVIDIA GPU ≥ 24 GB VRAM (RTX 3090/4090, A100 40GB, H100)
 
 ### 3.2 Validation Pipeline (Deterministic)
 ```python
-def validate_submission(challenge_id: str, miner_config: dict) -> ValidationResult:
-    # 1. Load challenge data (public train/holdout, hidden stress test)
+def validate_submission(challenge_id: str, miner_submission: dict) -> ValidationResult:
+    # 1. Load challenge data
     train_data, holdout_data, stress_data = load_challenge_splits(challenge_id)
+    challenge = load_challenge_metadata(challenge_id)
     
-    # 2. Pull backbone image
-    image = select_backbone_image(miner_config["backbone"])
+    # 2. Determine submission type and execute
+    if "specialist_pipeline" in miner_submission:
+        # Phase 2+: Composition track
+        model = execute_specialist_pipeline(
+            pipeline=miner_submission["specialist_pipeline"],
+            challenge=challenge,
+            train_data=train_data,  # For adapter training if present
+            seed=derive_seed(challenge_id, validator_hotkey)
+        )
+    else:
+        # Phase 0-1: Strategy JSON
+        model = train_backbone(
+            image=select_backbone_image(miner_submission["backbone"]),
+            config=miner_submission,
+            train_data=train_data,
+            custom_data=resolve_custom_data(miner_submission.get("custom_data")),
+            seed=derive_seed(challenge_id, validator_hotkey)
+        )
     
-    # 3. Inject config → train
-    model = train_backbone(
-        image=image,
-        config=miner_config,
-        train_data=train_data,
-        custom_data=resolve_custom_data(miner_config.get("custom_data")),
-        seed=derive_seed(challenge_id, validator_hotkey)
-    )
-    
-    # 4. Evaluate on public holdout
+    # 3. Evaluate on public holdout
     E_baseline = load_current_baseline_error(challenge_id)
-    E_submission = evaluate(model, holdout_data)
+    E_submission = evaluate(model, holdout_data, challenge)
     improvement = log(E_baseline) - log(E_submission)  # Log-space improvement
     
-    # 5. Hidden stress test + physics gates
-    stress_result = run_stress_test(model, stress_data, challenge_id)
+    # 4. Hidden stress test + physics gates
+    stress_result = run_stress_test(model, stress_data, challenge)
     
-    # 6. UQ calibration check
-    uq_metrics = evaluate_uq(model, stress_data, miner_config["uq_config"])
+    # 5. UQ calibration check
+    uq_metrics = evaluate_uq(model, stress_data, miner_submission.get("uq_config", {}))
     
     # 7. Compute score
     if stress_result.hard_failure:
@@ -125,7 +176,8 @@ def validate_submission(challenge_id: str, miner_config: dict) -> ValidationResu
         base_score = max(0.0, improvement)
         soft_penalty = stress_result.soft_penalty  # ≤ 1.0
         uq_bonus = 0.05 if uq_metrics.calibrated else 0.0
-        score = (base_score * soft_penalty) + 0.20 + uq_bonus  # Stress pass = +20%
+        # No stress_pass bonus - physics gates are pass/fail
+        score = (base_score * soft_penalty) + uq_bonus
     
     return ValidationResult(score, improvement, stress_result, uq_metrics)
 ```
@@ -164,9 +216,9 @@ If hard_failure: score = 0.0
 Else:
     base_improvement = max(0, log(E_baseline) - log(E_submission))
     soft_penalty = Π(soft_gate_penalties)  ∈ [0, 1]
-    stress_bonus = 0.20  (fixed for passing all hard gates)
     uq_bonus = 0.05 if UQ calibrated else 0.0
-    score = (base_improvement * soft_penalty) + stress_bonus + uq_bonus
+    # No stress_pass bonus - physics gates are pass/fail
+    score = (base_improvement * soft_penalty) + uq_bonus
 ```
 
 ### 3.5 Consensus
@@ -179,24 +231,44 @@ Else:
 
 ## 4. Challenge Specification
 
-### 4.1 Phase 0 Problem Suite (10 Problems)
+### 4.1 Phase 0: Single-Physics PDEs (7 Problems)
 
-| ID | Problem | Resolution | Train Split | Holdout | Stress Variants |
-|----|---------|------------|-------------|---------|-----------------|
-| 1 | 2D Poisson | 128×128 | 800 | 200 | Resolution 64/256, forcing freq |
-| 2 | **3D Poisson** | **64×64×64** | **400** | **100** | **Resolution 32/128, anisotropy** |
-| 3 | 2D Darcy | 128×128 | 800 | 200 | Permeability contrast 10³, log-normal |
-| 4 | **3D Darcy** | **64×64×64** | **400** | **100** | **Contrast 10⁴, channelized fields** |
-| 5 | 2D Burgers | 256×100 (x,t) | 800 | 200 | ν ∈ [0.001, 0.1], shock formation |
-| 6 | 2D NS (vorticity) | 128×128 | 800 | 200 | Re ∈ [10, 500], forcing spectrum |
-| 7 | **3D NS (low-Re)** | **64×64×32** | **400** | **100** | **Re ∈ [10, 100], 3D forcing** |
-| 8 | 2D Heat (κ(x,y)) | 128×128×50 (x,y,t) | 800 | 200 | κ contrast 10³, time horizon |
-| 9 | 2D Elasticity | 128×128 | 800 | 200 | λ/μ contrast, mixed BCs, locking test |
-| 10 | 2D Thermo-Elasticity | 128×128×50 | 400 | 100 | Coupling β ∈ [0.1, 1.0], transient |
+| ID | Problem | Dimension | Physics Class | Resolution | Reference |
+|----|---------|-----------|---------------|------------|-----------|
+| 1 | Poisson | 2D / 3D | Elliptic, constant-coeff | 128² / 64³ | PhysicsNeMo |
+| 2 | Darcy | 2D / 3D | Elliptic, variable-coeff | 128² / 64³ | PhysicsNeMo / PDEBench |
+| 3 | Burgers | 2D | Nonlinear advection/shocks | 256×100 (x,t) | PhysicsNeMo |
+| 4 | Navier-Stokes | 2D / 3D | Incompressible (2D vortex / 3D laminar Re≤100) | 128² / 64³×32 | PhysicsNeMo / JHTDB |
+| 5 | Heat | 2D | Transient, variable κ | 128²×50 | PhysicsNeMo |
+| 6 | Elasticity | 2D | Vector, tensor physics | 128² | PhysicsNeMo |
+| 8 | Thermo-elasticity | 2D | Multi-physics, loss_vector | 128²×50 | Generated (48 Tier 1) |
 
-**Data sources:** PDEBench, JHTDB, PhysicsNeMo examples, procedural generation (seeded by challenge_id)
+**Each challenge provides:** public training split, public holdout set, hidden stress test (procedural parameter/geometry shifts seeded by challenge_id).
 
-### 4.2 Challenge Generation (Deterministic)
+### 4.2 Phase 1: Same Challenges + Customization
+Same 7 problems. Miners add LoRA adapters and custom datasets.
+
+### 4.3 Phase 2: Multi-Physics Composition (Verified Benchmarks First)
+
+**Phase 2A (Months 1-3): Verified Benchmarks Only**
+| Challenge | Source | Physics | Specialist Pair |
+|-----------|--------|---------|-----------------|
+| FSI 2D-1/2/3 | Turek/Hron | Fluid-Structure Interaction | `ns_2d` + `elasticity_2d` + `fsi_coupling` |
+| CHT: Solid cooling / Electronics | PDEBench | Conjugate Heat Transfer | `ns_2d` + `heat_2d` + `cht_coupling` |
+
+**Phase 2B (Month 3):** Thermo-Elasticity. Generate 48 Tier-1 references (β×κ×geometry) at 256² with FEniCS monolithic, mesh-converged. Cost: ~$3K.
+
+**Phase 2C (Months 4-5):** Variant expansion (new Re, geometries, coupling strengths) on FSI/CHT/thermo-elasticity using existing references.
+
+### 4.4 Phase 3: 3D Multi-Physics (Post-Turbulence Bridge)
+
+| Phase | Challenges | Specialist Composition | Reference |
+|-------|------------|------------------------|-----------|
+| **3.2A** 3D FSI | Cylinder, flap, turbulent | `ns_3d_turbulent` + `elasticity_3d` + `fsi_3d_adapter` | preCICE partitioned |
+| **3.2B** 3D Thermo-Elasticity | Bimetal, engine, turbine | `elasticity_3d` + `heat_3d` + `thermal_expansion_3d` | FEniCS monolithic |
+| **3.2C** 3D CHT | Electronics, turbine, battery | `ns_3d_turbulent` + `heat_3d` + `cht_3d_adapter` | OpenFOAM/COMSOL |
+
+### 4.5 Challenge Generation (Deterministic)
 ```python
 def generate_challenge(challenge_id: str, problem_id: int) -> Challenge:
     seed = hash(challenge_id + str(problem_id))
@@ -239,7 +311,7 @@ message StrategyFragment {
   bool stress_passed = 7;
   UQMetrics uq_metrics = 8;
   float score = 9;
-  uint64 timestamp = 10;
+  uint64 timestamp = 10.
   repeated string causal_parents = 11; // Fragment IDs this derived from
   map<string, float> param_values = 12; // Flattened config for analysis
 }
@@ -342,7 +414,7 @@ message Specialist {
   ValidityDomain validity = 4;        // PDE params where specialist works
   repeated string known_failures = 5; // e.g., "fails at Re>500"
   License license = 6;                // DUAL: AGPL-3.0 + Commercial
-  uint64 created_at = 7;
+  uint64 created_at = 7.
   string distilled_from = 8;          // Fragment IDs of teachers
 }
 ```
@@ -426,30 +498,100 @@ def fine_tune_foundation(client_data: EncryptedBlob, problem_signature: ProblemS
 
 ---
 
-## 9. Implementation Checklist
-
-### Phase 0 (Launch)
-- [ ] 5 backbone Docker images built & tested
-- [ ] 10 challenge datasets generated + stress floors calibrated
-- [ ] Validator pipeline: train → evaluate → stress test → score
-- [ ] Miner CLI: submit JSON, pay fee, query results
-- [ ] Chain pallet: challenge management, scoring consensus, emissions
-- [ ] Landscape Agent: fragment store, DML causal inference, baseline proposer
-- [ ] Dashboard: live leaderboard, fragment explorer, causal graph
-
-### Phase 1 (Month 2-3)
-- [ ] LoRA adapter support in validator
-- [ ] Custom data ingestion + caching + data royalty pool
-- [ ] Specialist distillation pipeline (ONNX export + regression test)
-- [ ] Dual-license legal framework
-
-### Phase 2 (Month 4-6)
-- [ ] Specialist Bank on-chain registry
-- [ ] Miner specialist selection pathway
-- [ ] Foundation Operator multi-teacher distillation
-- [ ] Commercial fine-tuning API (TEE integration)
+You're right - the checklist still has the old timeline. Here's the **updated Section 9** matching the new roadmap:
 
 ---
+
+## 9. Implementation Checklist
+
+### Phase 0: The Causal Baseline (Launch → Month 3)
+- [ ] 5 backbone Docker images built & tested (`fno`, `pino`, `deeponet`, `gno`, `oformer`)
+- [ ] 7 challenge datasets generated + stress floors calibrated (Poisson 2D/3D, Darcy 2D/3D, Burgers, NS 2D/3D laminar, Heat, Elasticity, Thermo-elasticity)
+- [ ] Validator pipeline: train → evaluate → stress test → score (median consensus, 3+ validators)
+- [ ] Miner CLI: submit JSON, pay 0.1 TAO fee, query results
+- [ ] Chain pallet: challenge management, scoring consensus, per-challenge emission budget (40/30/20/10 split)
+- [ ] Landscape Agent: fragment store, DML causal inference, daily baseline proposer
+- [ ] Dashboard: live leaderboard, fragment explorer, causal graph
+
+### Phase 1: Specialist Bank & Data Markets (Months 3-6)
+- [ ] LoRA adapter support in validator (rank-4-8, target layer selection)
+- [ ] Custom data ingestion + caching + data royalty pool (5% of emissions)
+- [ ] Specialist distillation pipeline: multi-teacher → ONNX export → regression test (same stress tests)
+- [ ] Dual-license legal framework (AGPL-3.0 + Commercial)
+- [ ] Specialist Bank on-chain registry (specialist_id, onnx_model, validity_domain, license)
+- [ ] Miner CLI: `custom_data` submission, `uq_config` support
+
+### Phase 2: Composition Engine & Specialist Marketplace (Months 6-18)
+**Phase 2A (Months 6-9): Verified Benchmarks**
+- [ ] FSI challenges (Turek/Hron 2D-1/2/3) with preCICE reference
+- [ ] CHT challenges (PDEBench solid cooling + electronics) with OpenFOAM reference
+- [ ] Three-track leaderboard implementation: Monolith / Composition / Specialist-Only
+- [ ] `specialist_pipeline` JSON schema support in validator
+- [ ] `execute_specialist_pipeline()` validator logic (staggered coupling, adapter support)
+
+**Phase 2B (Month 9): Thermo-Elasticity**
+- [ ] Generate 48 Tier-1 thermo-elasticity references (FEniCS monolithic, mesh-converged)
+- [ ] Add thermo-elasticity challenges with `loss_vector` coupling terms
+
+**Phase 2C (Months 10-14): Variant Expansion**
+- [ ] FSI/CHT/Thermo-elasticity variants (new Re, geometries, coupling strengths)
+- [ ] Specialist Bank: ≥50 specialists, reuse rate >80%
+- [ ] Composition win rate >60% on multi-physics challenges
+- [ ] Adapter innovation >30% (novel coupling adapters)
+- [ ] Go/No-Go gate evaluation for 3D transition
+
+### Phase 2C Exit Criteria (Go/No-Go for 3D Transition)
+| Metric | Target | If Missed |
+|--------|--------|-----------|
+| Composition win rate | >60% (Composition > Monolith) | Pivot: deepen single-physics specialist depth |
+| Specialist reuse | >80% compositions use ≥1 Bank specialist | Extend Phase 1 |
+| Adapter innovation | >30% novel adapters | Expand adapter design space |
+| Stress test pass rate | >70% compositions pass | Coupling brittle → simplify adapter design |
+
+### Phase 3: 3D Transition & Foundation Operator (Months 18+)
+
+### Phase 3 Entry Gates (All Required)
+| Gate | Metric | Threshold |
+|------|--------|-----------|
+| 2D composition proven | Composition win rate >60% | Phase 2 complete |
+| 3D single-physics specialists exist | ≥6 specialists in Bank | Phase 3.0 prereq |
+| Curriculum validated | 2D→3D fine-tune <50% scratch cost | Ablation study |
+| 3D reference pipeline works | Tier 1 3D reference generated, mesh-converged | Pipeline test |
+| Validator quorum | ≥5 validators with 24GB+ GPUs | Infrastructure ready |
+
+**Phase 3.0: 3D Single-Physics Foundations (Prerequisite)**
+- [ ] 3D curriculum distillation pipeline: 2D specialist → 3D (zero-pad Fourier + noise → curriculum 32³→64³→128³)
+- [ ] 3D single-physics specialists in Bank: `poisson_3d`, `darcy_3d`, `ns_3d_laminar`, `heat_3d`, `elasticity_3d`
+- [ ] All 3D single-physics specialists pass stress tests (mass, energy, rollout, UQ)
+
+**Phase 3.1: 3D Turbulence Bridge (Critical - Months 1-3 of Phase 3)**
+- [ ] 3D Spectral Initialization Protocol (proper 3D energy spectrum priors, not zero-pad)
+- [ ] 3D Turbulence Curriculum: Re=50→100→200→500 on channel/cylinder
+- [ ] `ns_3d_turbulent_v1` specialist with verified k^(-5/3) energy spectrum
+- [ ] 3D-specific stress gates: energy spectrum (k^(-5/3)), Q-criterion, wall shear, Nu distribution
+- [ ] Gate: `ns_3d_turbulent_v1` passes all 3D turbulence stress tests
+
+### Phase 3.1 Gate (All Required Before 3.2)
+| Metric | Threshold |
+|--------|-----------|
+| Energy spectrum | Verified k^(-5/3) scaling |
+| Q-criterion gate | Pass |
+| Wall shear stress distribution | Pass |
+| Nu distribution (3D corners) | Pass |
+| Stress test pass rate | >70% |
+
+**Phase 3.2: 3D Multi-Physics Rollout**
+- [ ] 3D FSI: `ns_3d_turbulent` + `elasticity_3d` + `fsi_3d_adapter` (preCICE reference)
+- [ ] 3D Thermo-Elasticity: `elasticity_3d` + `heat_3d` + `thermal_expansion_3d_adapter` (FEniCS reference)
+- [ ] 3D CHT: `ns_3d_turbulent` + `heat_3d` + `cht_3d_adapter` (OpenFOAM/COMSOL reference)
+- [ ] Three-track leaderboard + same stress tests for all 3D multi-physics
+
+**Phase 3.3: Foundation Operator (LPM)**
+- [ ] Multi-teacher distillation across entire Specialist Bank (2D + 3D)
+- [ ] FiLM conditioning on ProblemSignature
+- [ ] Evidential UQ head (μ, σ, ν, α for Student-t)
+- [ ] Commercial fine-tuning API: TEE decryption → LoRA rank=8 (10-50 steps) → stress test verification → encrypted ONNX return
+- [ ] LPM fine-tuning API commercial launch
 
 ## 10. Appendix: Mathematical Definitions
 
@@ -479,4 +621,4 @@ sharpness = (1/N) Σ width(PI_α(x))
 
 ---
 
-*End of SPEC.md v1.0*
+*End of SPEC.md v2.0*
