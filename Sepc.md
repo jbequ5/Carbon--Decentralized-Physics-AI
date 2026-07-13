@@ -1,8 +1,4 @@
-You're right - I restructured it instead of just updating. Here's **v2.0 in the exact same v1.0 format** with all updates integrated:
-
----
-
-# SPEC.md — Hydrogen PDE Subnet Technical Specification v2.0
+# SPEC.md — Hydrogen PDE Subnet Technical Specification v2.1
 
 ---
 
@@ -31,10 +27,14 @@ Open Challenge → Miner Strategy JSON → Validator Training → Physics-Gated 
 | 4th | 10% |
 | 5+ | 0% |
 
+**Novelty Bonus:** 5% of challenge budget awarded for strategies with high embedding-space distance from recent winners (measured via strategy embedding or causal graph coverage).
+
+**Bounty Accumulation:** Emissions accumulate until a submission meaningfully beats the current baseline (log-improvement > 0).
+
 **Submission fee:** 0.1 TAO (burned if validation fails pre-checks; covers validator marginal cost ~0.08 TAO/run)
 
 **Warm-up:** <10 distinct submissions/challenge → top 3 split 50/30/20  
-**Competitive:** Top-4 split as above (40/30/20/10)
+**Competitive:** Top-4 split as above (40/30/20/10) + novelty bonus
 
 ---
 
@@ -168,7 +168,7 @@ def validate_submission(challenge_id: str, miner_submission: dict) -> Validation
     # 5. UQ calibration check
     uq_metrics = evaluate_uq(model, stress_data, miner_submission.get("uq_config", {}))
     
-    # 7. Compute score
+    # 6. Compute score
     if stress_result.hard_failure:
         score = 0.0
         reason = stress_result.failure_reason
@@ -241,7 +241,7 @@ Else:
 | 4 | Navier-Stokes | 2D / 3D | Incompressible (2D vortex / 3D laminar Re≤100) | 128² / 64³×32 | PhysicsNeMo / JHTDB |
 | 5 | Heat | 2D | Transient, variable κ | 128²×50 | PhysicsNeMo |
 | 6 | Elasticity | 2D | Vector, tensor physics | 128² | PhysicsNeMo |
-| 8 | Thermo-elasticity | 2D | Multi-physics, loss_vector | 128²×50 | Generated (48 Tier 1) |
+| 7 | Thermo-elasticity | 2D | Multi-physics, loss_vector | 128²×50 | Generated (48 Tier 1) |
 
 **Each challenge provides:** public training split, public holdout set, hidden stress test (procedural parameter/geometry shifts seeded by challenge_id).
 
@@ -277,7 +277,7 @@ def generate_challenge(challenge_id: str, problem_id: int) -> Challenge:
     # Public splits (fixed per problem)
     train, holdout = load_fixed_splits(problem_id)
     
-    # Hidden stress test (procedural)
+    # Hidden stress test (procedural + Well data)
     stress = generate_stress_test(problem_id, rng)
     
     # Baseline config (from Landscape)
@@ -295,22 +295,119 @@ def generate_challenge(challenge_id: str, problem_id: int) -> Challenge:
     )
 ```
 
+### 4.6 Hidden Stress Test Generation with The Well
+```python
+def generate_stress_test(problem_id: int, rng: np.random.Generator) -> StressTestData:
+    """
+    Generates hidden stress test combining procedural variants + The Well data.
+    Custom per challenge, seeded by challenge_id.
+    """
+    # 1. Procedural variants (existing)
+    procedural_variants = generate_procedural_variants(problem_id, rng)
+    
+    # 2. Well data slices (custom per challenge)
+    well_slices = get_well_slices_for_problem(problem_id, rng)
+    
+    # 3. Combine and return
+    return StressTestData(
+        procedural=procedural_variants,
+        well_slices=well_slices,
+        seed=rng.bit_generator.state
+    )
+
+def get_well_slices_for_problem(problem_id: int, rng: np.random.Generator) -> List[WellSlice]:
+    """
+    Returns Well data slices relevant to the specific PDE problem.
+    Each slice is a high-fidelity simulation sample from The Well dataset.
+    """
+    well_mapping = {
+        1: ["active_matter"],                    # Poisson - not directly relevant
+        2: ["active_matter"],                    # Darcy - porous media flow
+        3: ["turbulence", "viscoelastic"],       # Burgers - turbulence/viscoelastic
+        4: ["turbulence", "mhd"],                # Navier-Stokes - turbulence + MHD
+        5: ["acoustic_scattering"],              # Heat - wave/thermal
+        6: ["active_matter", "viscoelastic"],    # Elasticity - solid mechanics
+        7: ["active_matter", "viscoelastic"],    # Thermo-elasticity - coupled
+    }
+    
+    datasets = well_mapping.get(problem_id, [])
+    slices = []
+    for ds_name in datasets:
+        slice = sample_well_dataset(ds_name, rng, num_samples=50)
+        slices.append(slice)
+    
+    return slices
+```
+
 ---
 
-## 5. Landscape Agent Specification
+## 5. Three Competition Tracks (Phase 2+)
 
-### 5.1 Data Model
+In Phase 2+, multi-physics challenges run **three parallel leaderboards** on the *same* hidden stress test:
+
+| Track | Submission Format | What It Proves |
+|-------|-------------------|----------------|
+| **Monolith** | Single strategy JSON (end-to-end training config for coupled problem) | Can a monolithic model beat composition? |
+| **Composition** | Specialist pipeline: `{"specialist_pipeline": [{"specialist_id": "ns_2d_v4"}, {"specialist_id": "heat_2d_v3"}, {"adapter_id": "cht_coupling_v2"}]}` | Does composition of specialists beat monolith? |
+| **Specialist-Only** | Single specialist ID (no adapter) | How much does the coupling adapter matter? |
+
+**Same hidden stress test, same physics gates, three parallel leaderboards.** The Composition track is where miners build **customizable surrogates** — assembling verified specialists with adapters for specific multi-physics problems.
+
+---
+
+## 6. Specialist Promotion Gauntlet (Phase 2+)
+
+**Team-side only. Validators are NOT involved in distillation or specialist evaluation.**
+
+### 6.1 Promotion Pipeline
+```
+1. Multi-teacher distillation → candidate specialist
+2. Regression test: MUST pass SAME stress tests as miners
+3. Judge Panel: 3 judges (team-side, different backbones) re-run + vote
+4. Repair Loop: If any judge fails → specialist rejected → feedback to Landscape
+5. Grounding Gate: Explicit lineage to validated fragments + physics gate passes
+6. Decontamination Check: Verify no memorization of public holdout sets
+7. Multi-round Consistency: Must pass across 3+ challenge variations (Triple Crown)
+8. Promote to Specialist Bank with validity domain
+```
+
+### 6.2 Judge Panel Specification
+- **3 judges** (team-side)
+- Each judge uses a **different backbone** (FNO, PINO, DeepONet, etc.)
+- All judges run the **same stress tests** independently
+- **Unanimous pass required** for promotion
+- Failed judge → repair loop triggered → feedback to Landscape Agent
+
+### 6.3 Grounding Gate
+Every specialist must have explicit lineage to validated fragments:
+- `distilled_from` field lists Fragment IDs of teacher strategies
+- Each fragment must have passed physics gates
+- Causal lineage traceable to baseline improvements
+
+### 6.4 Decontamination Check
+- Verify specialist does not memorize public holdout sets
+- Test on held-out Well slices not used in training
+- Check for exact memorization vs. generalization
+
+### 6.5 Triple Crown Consistency
+Specialist must pass stress tests across **3+ challenge variations** (different Re, geometries, coupling strengths) before promotion.
+
+---
+
+## 7. Landscape Agent Specification
+
+### 7.1 Data Model
 ```protobuf
 message StrategyFragment {
   string fragment_id = 1;              // SHA256(config_json + challenge_id + timestamp)[:16]
   int32 miner_uid = 2;
-  string challenge_id = 3;
-  int32 problem_id = 4;
-  string config_json = 5;
+  string challenge_id = 3.
+  int32 problem_id = 4.
+  string config_json = 5.
   float improvement = 6;               // log(E_baseline) - log(E_submission)
-  bool stress_passed = 7;
-  UQMetrics uq_metrics = 8;
-  float score = 9;
+  bool stress_passed = 7.
+  UQMetrics uq_metrics = 8.
+  float score = 9.
   uint64 timestamp = 10.
   repeated string causal_parents = 11; // Fragment IDs this derived from
   map<string, float> param_values = 12; // Flattened config for analysis
@@ -324,7 +421,7 @@ message UQMetrics {
 }
 ```
 
-### 5.2 Daily Causal Update (Post-Challenge)
+### 7.2 Daily Causal Update (Post-Challenge)
 ```python
 def daily_causal_update(new_fragments: List[StrategyFragment]):
     # 1. Add to fragment DAG
@@ -356,7 +453,7 @@ def daily_causal_update(new_fragments: List[StrategyFragment]):
         owner_review_queue.put(proposal)
 ```
 
-### 5.3 Weekly Specialist Distillation
+### 7.3 Weekly Specialist Distillation (Team-Side)
 ```python
 def weekly_distillation():
     for problem_id in PROBLEM_FAMILIES:
@@ -382,19 +479,20 @@ def weekly_distillation():
             log_failure("Distilled specialist failed stress test")
             continue
         
-        # 4. Export ONNX + metadata
-        specialist = Specialist(
-            specialist_id=f"{problem_id}_v{version}",
-            onnx_model=export_onnx(student),
-            problem_signature=get_signature(problem_id),
-            metrics=evaluate_full(student, problem_id),
-            validity_domain=estimate_validity_domain(student, problem_id),
-            license="AGPL-3.0 + Commercial Dual-License"
-        )
-        specialist_bank.publish(specialist)
+        # 4. Enter Specialist Promotion Gauntlet
+        if pass_specialist_gauntlet(student, problem_id):
+            specialist = Specialist(
+                specialist_id=f"{problem_id}_v{version}",
+                onnx_model=export_onnx(student),
+                problem_signature=get_signature(problem_id),
+                metrics=evaluate_full(student, problem_id),
+                validity_domain=estimate_validity_domain(student, problem_id),
+                license="AGPL-3.0 + Commercial Dual-License"
+            )
+            specialist_bank.publish(specialist)
 ```
 
-### 5.4 Landscape Treasury & Governance
+### 7.4 Landscape Treasury & Governance
 - **Funding:** 18% Owner emissions + 10% time-locked (6-month cliff, 2-year vest)
 - **Multi-sig:** 3/5 (Owner, Lead Validator, Lead Researcher, Community Rep, Legal)
 - **Spending:** Agent compute, specialist distillation GPU, challenge generation, audits
@@ -402,9 +500,9 @@ def weekly_distillation():
 
 ---
 
-## 6. Specialist Bank & Marketplace
+## 8. Specialist Bank & Marketplace
 
-### 6.1 Specialist Metadata
+### 8.1 Specialist Metadata
 ```protobuf
 message Specialist {
   string specialist_id = 1;           // e.g., "navier_stokes_2d_v3"
@@ -419,7 +517,7 @@ message Specialist {
 }
 ```
 
-### 6.2 Miner Usage (Phase 2+)
+### 8.2 Miner Usage (Phase 2+)
 ```json
 {
   "specialist_id": "navier_stokes_2d_v3",
@@ -432,7 +530,7 @@ message Specialist {
 ```
 Validator loads ONNX → runs inference on holdout + stress test → scores.
 
-### 6.3 Licensing Model
+### 8.3 Licensing Model
 - **AGPL-3.0:** Free for research, open-source, internal use
 - **Commercial License:** Per-seat or per-inference API, includes:
   - Indemnification
@@ -440,17 +538,114 @@ Validator loads ONNX → runs inference on holdout + stress test → scores.
   - Fine-tuning support on private data
   - Validity domain extension consulting
 
+### 8.4 Agent Participation Interface (Phase 0+)
+
+#### 8.4.1 REST API Endpoints
+```
+GET  /api/v1/challenges                    # List active challenges
+GET  /api/v1/challenges/{challenge_id}     # Challenge details
+GET  /api/v1/challenges/{challenge_id}/baseline     # Current baseline JSON
+GET  /api/v1/challenges/{challenge_id}/priors       # Landscape priors (DML effects)
+GET  /api/v1/specialists                   # List available specialists
+GET  /api/v1/specialists/{specialist_id}   # Specialist details
+POST /api/v1/submit                        # Submit strategy/specialist pipeline
+GET  /api/v1/submissions/{submission_id}   # Submission results + feedback
+```
+
+#### 8.4.2 Submission Payloads
+**Phase 0-1 (Strategy JSON):**
+```json
+{
+  "challenge_id": "ns_2d_v1",
+  "hotkey": "5F...",
+  "strategy": { ... }  // Strategy JSON per Section 2.1
+}
+```
+
+**Phase 2+ (Specialist Pipeline):**
+```json
+{
+  "challenge_id": "fsi_2d_v1",
+  "hotkey": "5F...",
+  "specialist_pipeline": { ... }  // Per Section 2.2
+}
+```
+
+#### 8.4.3 Structured Feedback Response
+```json
+{
+  "submission_id": "sub_abc123",
+  "status": "accepted",
+  "rank": 3,
+  "score": 0.047,
+  "improvement_vs_baseline": 0.012,
+  "novelty_bonus": 0.005,
+  "emission_reward": 124.5,
+  "physics_gates": {
+    "mass_conservation": { "passed": true, "value": 4.2e-4 },
+    "energy_dissipation": { "passed": false, "value": 3.1e-4 },
+    "rollout_stability": { "passed": true }
+  },
+  "stress_test_summary": {
+    "passed": 7,
+    "failed": 2,
+    "worst_case_degradation": 0.18
+  },
+  "causal_insights": [
+    { "parameter": "pino_loss_weight", "effect": "+0.008", "confidence": 0.87 }
+  ],
+  "suggestions": [
+    "Increase conservation weight to 1.0",
+    "Start curriculum at 32² resolution"
+  ],
+  "validator_consensus": "strong"
+}
+```
+
+#### 8.4.4 hydrogen-agent Python SDK
+```python
+# Installation
+pip install hydrogen-agent
+
+# Usage
+from hydrogen_agent import HydrogenClient
+
+client = HydrogenClient(hotkey=agent_hotkey)
+
+# Discover challenges
+challenges = client.list_challenges()
+
+# Get baseline + priors for a challenge
+challenge = client.get_challenge("ns_2d_v1")
+baseline = client.get_baseline("ns_2d_v1")
+priors = client.get_priors("ns_2d_v1")
+
+# Generate strategy (agent's own logic)
+strategy = agent.generate_strategy(baseline, priors)
+
+# Local validation (optional but recommended)
+local_result = client.validate_locally(strategy, challenge_id="ns_2d_v1")
+
+# Submit
+result = client.submit(strategy)
+print(f"Rank: {result.rank}, Score: {result.score}, Reward: {result.emission_reward}")
+
+# Feedback
+for gate, result in result.physics_gates.items():
+    print(f"{gate}: {'PASS' if result.passed else 'FAIL'} ({result.value})")
+```
+
 ---
 
-## 7. Foundation Operator (Phase 3+)
+## 9. Foundation Operator (Phase 3+)
 
-### 7.1 Architecture
+### 9.1 Architecture
 - **Backbone:** FNO/PINO hybrid (spectral + local kernels)
 - **Width:** 128 channels, 6 spectral blocks
 - **Conditioning:** ProblemSignature → FiLM layers modulate backbone
 - **UQ:** Built-in evidential head (outputs μ, σ, ν, α for Student-t)
 
-### 7.2 Training
+### 9.2 Training
 ```
 Multi-teacher distillation from Specialist Bank:
   L = Σ w_i * MSE(foundation(x), specialist_i(x)) 
@@ -460,7 +655,7 @@ Multi-teacher distillation from Specialist Bank:
 ```
 **Data:** Union of all specialist training data + synthetic ProblemSignature sampling
 
-### 7.3 Fine-Tuning API (Commercial)
+### 9.3 Fine-Tuning API (Commercial)
 ```python
 def fine_tune_foundation(client_data: EncryptedBlob, problem_signature: ProblemSignature) -> Specialist:
     # 1. Decrypt in TEE (NVIDIA CC / AMD SEV)
@@ -479,9 +674,9 @@ def fine_tune_foundation(client_data: EncryptedBlob, problem_signature: ProblemS
 
 ---
 
-## 8. Consensus & Slashing
+## 10. Consensus & Slashing
 
-### 8.1 Validator Slashing Conditions
+### 10.1 Validator Slashing Conditions
 | Offense | Evidence | Slash |
 |---------|----------|-------|
 | Score deviation > 0.15 from median (3+ consecutive) | On-chain scores | 5% stake |
@@ -489,7 +684,7 @@ def fine_tune_foundation(client_data: EncryptedBlob, problem_signature: ProblemS
 | Failed reproducibility audit | Auditor rerun ≠ submitted score | 10% stake |
 | Physics check manipulation | Auditor finds disabled checks | 20% stake + ban |
 
-### 8.2 Miner Penalties
+### 10.2 Miner Penalties
 | Offense | Penalty |
 |---------|---------|
 | Invalid JSON / schema violation | 0.1 TAO fee burned |
@@ -498,11 +693,72 @@ def fine_tune_foundation(client_data: EncryptedBlob, problem_signature: ProblemS
 
 ---
 
-You're right - the checklist still has the old timeline. Here's the **updated Section 9** matching the new roadmap:
+## 11. Emission Distribution
+
+### 11.1 Per-Challenge Budget
+```
+challenge_budget = total_subnet_emission / number_of_active_challenges
+```
+
+### 11.2 Distribution (Competitive Phase)
+| Rank | Share of Challenge Budget |
+|------|---------------------------|
+| 1st | 40% |
+| 2nd | 30% |
+| 3rd | 20% |
+| 4th | 10% |
+| 5+ | 0% |
+
+**Novelty Bonus:** 5% of challenge budget for embedding-space distance from recent winners.
+
+**Validators (41%):** Paid per validation via median consensus scoring completeness + physics-check audit.
+
+**Owner (18%):** Funds Landscape Agent, Specialist Bank, Challenge Infra, Treasury (10% time-locked).
+
+**Warm-up (<10 distinct submissions/challenge):** Top 3 split 50/30/20.
 
 ---
 
-## 9. Implementation Checklist
+## 12. Phase Definitions
+
+### Phase 0: The Causal Baseline (Launch → Month 3)
+**Challenges:** 7 single-physics PDEs (Poisson 2D/3D, Darcy 2D/3D, Burgers, NS 2D/3D laminar, Heat, Elasticity, Thermo-elasticity)
+
+**What Happens:** Miners submit strategy JSONs; validators train, evaluate, stress-test; Landscape builds causal fragment DAG, proposes daily baseline updates.
+
+**Product:** Causal Knowledge Graph — 500+ causally-validated interventions across 7 PDE problems.
+
+**Revenue:** $2-5M/yr licensing causal knowledge graph.
+
+### Phase 1: Specialist Bank & Data Markets (Months 3-6)
+**Challenges:** Same 7 problems. Miners add LoRA adapters and custom datasets.
+
+**What Happens:** Validators apply adapters, cache custom data, measure data impact. Landscape pays data royalties (5% of emissions). Weekly distillation → ONNX specialists (AGPL-3.0 + commercial).
+
+**Product:** 20-30 verified ONNX specialists with validity domains, calibrated UQ, dual licensing. Data royalty pipeline.
+
+**Revenue:** $10-50M/yr specialist licensing, data royalties, fine-tuning API.
+
+### Phase 2: Composition Engine & Specialist Marketplace (Months 6-18)
+**Challenges:** Multi-physics on verified benchmarks (FSI Turek/Hron, CHT PDEBench, Thermo-elasticity generated).
+
+**What Happens:** Three-track leaderboard (Monolith vs Composition vs Specialist-Only). Miners submit specialist pipelines. Landscape pays data royalties. Specialists composable via adapters.
+
+**Product:** Proven composition > monolith. Specialist Bank (50+ specialists) composable via adapters. Data royalty market.
+
+**Revenue:** $50-200M/yr composition engine licensing, custom pipelines, marketplace fees.
+
+### Phase 3: 3D Transition & Foundation Operator (Months 18+)
+**Phase 3.0:** 3D Single-Physics Foundations (curriculum distillation from 2D).
+**Phase 3.1:** 3D Turbulence Bridge (3-month dedicated phase).
+**Phase 3.2:** 3D Multi-Physics Rollout (FSI, Thermo-elasticity, CHT).
+**Phase 3.3:** Foundation Operator (LPM) — multi-teacher distillation across entire Specialist Bank.
+
+**Revenue:** $1B+ TAM. Foundation Operator API, custom surrogates, enterprise physics infrastructure.
+
+---
+
+## 13. Implementation Checklist
 
 ### Phase 0: The Causal Baseline (Launch → Month 3)
 - [ ] 5 backbone Docker images built & tested (`fno`, `pino`, `deeponet`, `gno`, `oformer`)
@@ -582,7 +838,7 @@ You're right - the checklist still has the old timeline. Here's the **updated Se
 
 **Phase 3.2: 3D Multi-Physics Rollout**
 - [ ] 3D FSI: `ns_3d_turbulent` + `elasticity_3d` + `fsi_3d_adapter` (preCICE reference)
-- [ ] 3D Thermo-Elasticity: `elasticity_3d` + `heat_3d` + `thermal_expansion_3d_adapter` (FEniCS reference)
+- [ ] 3D Thermo-Elasticity: `elasticity_3d` + `heat_3d` + `thermal_expansion_3d` (FEniCS reference)
 - [ ] 3D CHT: `ns_3d_turbulent` + `heat_3d` + `cht_3d_adapter` (OpenFOAM/COMSOL reference)
 - [ ] Three-track leaderboard + same stress tests for all 3D multi-physics
 
@@ -593,16 +849,18 @@ You're right - the checklist still has the old timeline. Here's the **updated Se
 - [ ] Commercial fine-tuning API: TEE decryption → LoRA rank=8 (10-50 steps) → stress test verification → encrypted ONNX return
 - [ ] LPM fine-tuning API commercial launch
 
-## 10. Appendix: Mathematical Definitions
+---
 
-### 10.1 Log-Space Improvement
+## 14. Appendix: Mathematical Definitions
+
+### 14.1 Log-Space Improvement
 ```
 improvement = log(E_baseline) - log(E_submission)
 where E = relative L2 error = ‖u_pred - u_true‖₂ / ‖u_true‖₂
 ```
 *Properties:* Rewards consistent orders-of-magnitude improvement; invariant to baseline magnitude.
 
-### 10.2 Double Machine Learning (DML) for Causal Effects
+### 14.2 Double Machine Learning (DML) for Causal Effects
 ```
 Y = improvement, T = target_param, X = other_params + context
 1. Regress Y ~ X → Ŷ, regress T ~ X → T̂
@@ -612,7 +870,7 @@ Y = improvement, T = target_param, X = other_params + context
 ```
 *Robust to:* High-dimensional X, non-linear relationships, partial confounding.
 
-### 10.3 UQ Calibration Metric
+### 14.3 UQ Calibration Metric
 ```
 calibration_error = |(1/N) Σ 1{y ∈ PI_α(x)} - (1-α)|
 sharpness = (1/N) Σ width(PI_α(x))
@@ -621,4 +879,4 @@ sharpness = (1/N) Σ width(PI_α(x))
 
 ---
 
-*End of SPEC.md v2.0*
+*End of SPEC.md v2.1*
