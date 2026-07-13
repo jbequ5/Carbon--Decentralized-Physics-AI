@@ -1,6 +1,10 @@
 # Appendix B: Validator Runtime Specification (Merged)
 
-**Single source of truth for validator execution environment, determinism, and chain/API integration.**
+**Purpose:** This document specifies the complete validator runtime environment, including Docker images, entrypoint execution, determinism requirements, I/O contracts, and the integration contract between the chain, API, and validator. It is the single source of truth for how validators execute, how they interface with the chain and API, and how determinism is enforced. This is the "runtime contract" that ensures reproducible, verifiable physics-informed neural operator training and evaluation.
+
+---
+
+# Appendix B: Validator Runtime Specification (Merged) v2.1
 
 ---
 
@@ -24,7 +28,8 @@ RUN pip install --no-cache-dir \
     omegaconf \
     pyyaml \
     boto3 \
-    requests
+    requests \
+    pyyaml
 
 # Hydrogen validator code
 COPY validator/ /workspace/validator/
@@ -105,8 +110,8 @@ def main():
         if "specialist_pipeline" in submission:
             model = execute_specialist_pipeline(
                 pipeline=submission["specialist_pipeline"],
-                challenge={"phase": challenge_phase, **challenge},
-                train_data=None,  # Specialists don't need training data
+                challenge=challenge,
+                train_data=train_data,  # For adapter training if present
                 seed=int(os.environ["HYDROGEN_SEED"])
             )
         else:
@@ -128,7 +133,7 @@ def main():
         # Evaluate on public holdout
         E_baseline = load_baseline_error(challenge_id)
         E_submission = evaluate(model, holdout_data, challenge_phase)
-        improvement = math.log(E_baseline) - math.log(E_submission)
+        improvement = math.log(E_baseline) - log(E_submission)
         
         # Hidden stress test + physics gates
         stress_result = run_stress_test(model, stress_data, challenge)
@@ -191,7 +196,7 @@ if __name__ == "__main__":
 | `CHALLENGE_DATA_PATH` | Yes | Path to mounted challenge data | `/data/challenge` |
 | `CHALLENGE_PHASE` | Yes | Current subnet phase (0-3) | `0` |
 | `HYDROGEN_SEED` | Yes | Deterministic seed for reproducibility | `42` |
-| `SUBMISSION_JSON` | Yes | Full miner submission as JSON string | `{"backbone":"PINO",...}` |
+| `SUBMISSION_JSON` | Yes | Miner's full submission as JSON string | `{"backbone":"PINO",...}` |
 | `SUBMISSION_TYPE` | No | `strategy` or `specialist_pipeline` | `strategy` |
 | `CUSTOM_DATA_PATH` | No | Path to custom data if mounted | `/data/custom` |
 
@@ -400,16 +405,30 @@ chain:
     - status: Enum[Active, Scoring, Completed]
   
   submission_commitment:
-    scheme: "commit-reveal"
+    scheme: "commit-reveal-v2"
     commit_phase_blocks: 100
     reveal_phase_blocks: 50
-    commitment_hash: "keccak256(json + nonce)"
+    commitment_hash: "blake2b256(COMMITMENT_DOMAIN || canonical_json || nonce || challenge_id || miner)"
+    canonical_serialization: "JCS (RFC 8785)"
+    nonce_requirements:
+      min_entropy_bits: 128
+      uniqueness: "per_challenge_per_miner"
+    commit_phase_blocks: 100
+    reveal_phase_blocks: 50
+    canonical_serialization: "JCS (RFC 8785)"
+    late_reveal_penalty: "score=0, fee_burned"
+    front_running_mitigation: "commitment_hides_strategy_until_reveal"
   
   validator_assignment:
-    method: "stake_weighted_random"
+    method: "stake_weighted_vrf"
     min_validators: 3
     max_validators: 7
     selection_block: "challenge_start_block + 10"
+    min_stake: 10000  # TAO
+    max_validators_per_entity: 2
+    performance_weight: 0.3
+    geographic_diversity: true
+    vrf_key_registration: required
   
   scoring_window:
     start_block: "submission_deadline_block"
@@ -420,6 +439,7 @@ chain:
     method: "median"
     max_deviation: 0.1
     audit_trigger: 0.15
+    min_validators_for_consensus: 3
   
   reward_distribution:
     trigger: "any_caller"
@@ -510,6 +530,4 @@ jobs:
 
 ---
 
-*End of Appendix B: Validator Runtime Specification*
-
----
+*End of Appendix B: Validator Runtime Specification v2.1*
