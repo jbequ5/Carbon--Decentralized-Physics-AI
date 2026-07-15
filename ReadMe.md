@@ -103,7 +103,7 @@ Bittensor provides the economic substrate where **verified improvement is the on
 We don't need a better neural operator. We need a system that compounds knowledge about how to train them.
 
 Hydrogen is a Bittensor subnet that turns the sim-to-real gap into a compounding physical knowledge economy.
-
+```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        HYDROGEN ARCHITECTURE                    │
 ├─────────────────────────────────────────────────────────────────┤
@@ -127,7 +127,7 @@ Hydrogen is a Bittensor subnet that turns the sim-to-real gap into a compounding
 │   Composable ONNX specialists + symbolic metadata + CUDA code   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
-
+```
 ## The Mechanism
 
 **Open challenges.** A set of challenges is open for competition at any time. Each challenge defines a PDE problem with a public training split, a public holdout set, and a **hidden stress test** generated procedurally from the challenge ID (shifted Reynolds numbers, resolutions, geometries, forcing). No miner has ever seen the stress test.
