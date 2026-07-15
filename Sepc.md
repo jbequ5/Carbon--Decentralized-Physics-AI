@@ -1,4 +1,4 @@
-# SPEC.md — Hydrogen PDE Subnet Technical Specification v2.2 (Complete with Symbolic Layer)
+# SPEC.md — Hydrogen PDE Subnet Technical Specification v2.3 (Complete with Symbolic Layer + Agent-Native Architecture + Phase-Field Physics + JAX/PyTorch Interop + Abaqus Ingestion + Agent-Native Architecture)
 
 ---
 
@@ -90,7 +90,14 @@ Open Challenge → Miner Strategy JSON → Validator Training → Physics-Gated 
   "symbolic_constraints": [
     "divergence_free: hard_constraint",
     "energy_dissipation: hard_constraint"
-  ]
+  ],
+  // NEW: JAX/PyTorch backend selection
+  "backend": "pytorch",  // or "jax"
+  "jax_config": {
+    "platform": "gpu",  // "gpu" | "tpu" | "cpu"
+    "precision": "bf16",  // "bf16" | "fp32" | "fp64"
+    "compile": true
+  }
 }
 ```
 
@@ -130,18 +137,24 @@ Open Challenge → Miner Strategy JSON → Validator Training → Physics-Gated 
 
 ## 3. Validator Specification
 
-### 3.1 Backbone Images (Pre-built, Pinned)
-| Image | Backbones | Base | PhysicsNeMo | NeuralOperator | PyTorch | CUDA |
-|-------|-----------|------|-------------|----------------|---------|------|
-| `hydrogen/validator:fno-v24.09` | FNO | nvcr.io/nvidia/pytorch:24.09-py3 | 24.09 | 0.3.0 | 2.3.0 | 12.4 |
-| `hydrogen/validator:pino-v24.09` | PINO | same | same | same | same | same |
-| `hydrogen/validator:deeponet-v24.09` | DeepONet | same | same | same | same | same |
-| `hydrogen/validator:gno-v24.09` | GNO | same | same | same | same | same |
-| `hydrogen/validator:oformer-v24.09` | OFormer | same | same | same | same | same |
+### 3.1 Backbone Images (Pre-built, Pinned) — **UPDATED WITH JAX SUPPORT**
+
+| Image | Backbones | Framework | Base | PhysicsNeMo | NeuralOperator | PyTorch/JAX | CUDA |
+|-------|-----------|-----------|------|-------------|----------------|-------------|------|
+| `hydrogen/validator:fno-v24.09` | FNO | PyTorch | nvcr.io/nvidia/pytorch:24.09-py3 | 24.09 | 0.3.0 | 2.3.0 | 12.4 |
+| `hydrogen/validator:pino-v24.09` | PINO | PyTorch | same | same | same | same | same |
+| `hydrogen/validator:deeponet-v24.09` | DeepONet | PyTorch | same | same | same | same | same |
+| `hydrogen/validator:gno-v24.09` | GNO | PyTorch | same | same | same | same | same |
+| `hydrogen/validator:oformer-v24.09` | OFormer | PyTorch | same | same | same | same | same |
+| **`hydrogen/validator:jax-fno-v24.09`** | **FNO** | **JAX (Equinox)** | **nvcr.io/nvidia/jax:24.09-py3** | **N/A** | **NeuralOperators.jl 0.3.0** | **JAX 0.4.30** | **12.4** |
+| **`hydrogen/validator:jax-pino-v24.09`** | **PINO** | **JAX (Equinox)** | **same** | **N/A** | **NeuralOperators.jl 0.3.0** | **JAX 0.4.30** | **12.4** |
+| **`hydrogen/validator:jax-deeponet-v24.09`** | **DeepONet** | **JAX (Equinox)** | **same** | **N/A** | **NeuralOperators.jl 0.3.0** | **JAX 0.4.30** | **12.4** |
 
 **Hardware requirement:** 
 - Phase 0-2: NVIDIA GPU ≥ 16 GB VRAM (RTX 3080/3090/4080/4090, A100)
 - Phase 3 (3D): NVIDIA GPU ≥ 24 GB VRAM (RTX 3090/4090, A100 40GB, H100)
+
+**Framework Selection:** Miners specify `"backend": "pytorch"` or `"jax"` in strategy JSON. Validator pulls corresponding image. JAX validators use `NeuralOperators.jl` (Julia) via Python-Julia bridge (`juliacall`) or native JAX (Equinox/Flax) implementations. Cross-framework validation via ONNX export/import.
 
 ### 3.2 Validation Pipeline (Deterministic)
 ```python
@@ -164,8 +177,10 @@ def validate_submission(challenge_id: str, miner_submission: dict) -> Validation
         )
     else:
         # Phase 0-1: Strategy JSON
+        # Detect framework from submission
+        framework = miner_submission.get("backend", "pytorch")  # "pytorch" | "jax"
         model = train_backbone(
-            image=select_backbone_image(miner_submission["backbone"]),
+            image=select_backbone_image(miner_submission["backbone"], framework),
             config=miner_submission,
             train_data=train_data,
             custom_data=resolve_custom_data(miner_submission.get("custom_data")),
@@ -197,7 +212,7 @@ def validate_submission(challenge_id: str, miner_submission: dict) -> Validation
     return ValidationResult(score, improvement, stress_result, uq_metrics)
 ```
 
-### 3.3 Physics Gates (Stress Test)
+### 3.3 Physics Gates (Stress Test) — **UPDATED WITH PHASE-FIELD GATES**
 
 #### Hard Gates (Score = 0 if failed)
 | Check | Formula | Threshold | PDE Classes |
@@ -207,6 +222,15 @@ def validate_submission(challenge_id: str, miner_submission: dict) -> Validation
 | **Boundary Satisfaction** | `‖u - u_BC‖₂ / ‖u_BC‖₂` | `< 1e-3` | All with BCs |
 | **Rollout Stability** | `‖E(t=T) - E(t=0)‖ / E(t=0)` | `< 0.01` | All transient |
 | **UQ Calibration** | `|coverage - target|` | `< 0.02` | All (UQ mandatory) |
+
+#### Phase-Field Specific Hard Gates (Phase 2B+)
+| Check | Formula | Threshold | Physics Meaning |
+|-------|---------|-----------|-----------------|
+| **Crack Irreversibility** | `min(∂d/∂t)` | `≥ 0` | Crack irreversibility (∂d/∂t ≥ 0) |
+| **Length Scale ℓ Enforcement** | `‖ℓ_pred - ℓ_true‖₂ / ‖ℓ_true‖₂` | `< 0.05` | Phase-field length scale consistency |
+| **Degradation Function g(d)** | `‖g(d)_pred - g(d)_true‖₂ / ‖g(d)_true‖₂` | `< 0.05` | Degradation function validity |
+| **History Variable H** | `‖H_pred - H_true‖₂ / ‖H_true‖₂` | `< 0.1` | History variable tracking |
+| **Crack Irreversibility (Integral)** | `∫(∂d/∂t)_- dt` | `= 0` | No healing (crack irreversibility) |
 
 #### Soft Gates (Multiplicative Penalty)
 | Check | Formula | Penalty Function |
@@ -282,11 +306,84 @@ def uq_calibration_bonus(uq_metrics, phase):
 
 **Each challenge provides:** public training split, public holdout set, hidden stress test (procedural + Well data, seeded by challenge_id), **symbolic metadata**.
 
-### 4.2 Phase 1: Same Challenges + Customization
+### 4.2 Phase 1: Same Challenges + Customization + Abaqus Ingestion
 Same 7 problems. Miners add LoRA adapters and custom datasets.
 
+#### 4.2.1 Abaqus ODB/fil Ingestion Pipeline (NEW — Phase 1)
+```python
+def ingest_abaqus_data(data_uri: str, checksum: str) -> CustomDataset:
+    """
+    Ingests Abaqus ODB (.odb) and FORTRAN output (.fil) files.
+    Returns standardized CustomDataset for validator ingestion.
+    """
+    # 1. Verify checksum
+    verify_sha256(data_uri, expected_checksum)
+    
+    # 2. Download and cache
+    local_path = download_to_cache(data_uri)
+    
+    # 3. Parse based on file extension
+    if local_path.endswith('.odb'):
+        return parse_abaqus_odb(local_path)
+    elif local_path.endswith('.fil'):
+        return parse_abaqus_fil(local_path)
+    else:
+        raise ValueError("Unsupported Abaqus format")
+    
+def parse_abaqus_odb(odb_path: str) -> CustomDataset:
+    """
+    Parses Abaqus ODB using abapy/abaqus2py.
+    Extracts: mesh, field outputs (stress, strain, displacement), history outputs.
+    """
+    import abapy
+    odb = abapy.postproc.from_odb(odb_path)
+    
+    # Extract mesh
+    nodes = odb.mesh.nodes
+    elements = odb.mesh.elements
+    
+    # Extract field outputs at each frame
+    field_data = {}
+    for step_name, step in odb.steps.items():
+        for frame in step.frames:
+            for field_name, field in frame.field_outputs.items():
+                if field_name not in field_data:
+                    field_data[field_name] = []
+                field_data[field_name].append(field.bulk_data)
+    
+    # Interpolate to challenge grid if needed
+    return CustomDataset(
+        mesh={"nodes": nodes, "elements": elements},
+        fields=field_data,
+        metadata={"source": "abaqus_odb", "format": "odb"}
+    )
+
+def parse_abaqus_fil(fil_path: str) -> CustomDataset:
+    """
+    Parses Abaqus FORTRAN output (.fil) files.
+    Extracts: nodal displacements, stresses, strains at each increment.
+    """
+    # .fil is ASCII - parse line by line
+    with open(fil_path, 'r') as f:
+        lines = f.readlines()
+    
+    # Parse header, then increment blocks
+    # Format: INCREMENT, TIME, NODE, DOF, VALUE...
+    data = parse_fil_blocks(lines)
+    
+    return CustomDataset(
+        field_data=data,
+        metadata={"source": "abaqus_fil", "format": "fil"}
+    )
+```
+
+**Validator Integration:** Miner submits `custom_data` with `data_uri` pointing to IPFS-hosted ODB/fil. Validator downloads, runs ingestion pipeline, caches parsed `CustomDataset`, mixes with procedural data per `weight` parameter.
+
+### 4.2 Phase 1: Same Challenges + Customization + Abaqus Ingestion
+Same 7 problems. Miners add LoRA adapters and custom datasets (including Abaqus ODB/fil via new ingestion pipeline).
+
 ### 4.2 Phase 1: Same Challenges + Customization
-Same 7 problems. Miners add LoRA adapters and custom datasets.
+Same 7 problems. Miners add LoRA adapters and custom datasets (including Abaqus ODB/fil via new ingestion pipeline).
 
 ### 4.3 Phase 2: Multi-Physics Composition (Verified Benchmarks First)
 
@@ -370,7 +467,7 @@ def get_well_slices_for_problem(problem_id: int, rng: np.random.Generator) -> Li
 
 ---
 
-## 5. Three Competition Tracks (Phase 2+)
+## 5. Six Competition Tracks (Phase 2+)
 
 | Track | Submission Format | What It Proves |
 |-------|-------------------|----------------|
@@ -539,7 +636,208 @@ def weekly_distillation():
 
 ---
 
-## 8. Specialist Bank & Marketplace
+## 7.5 Agent-Native Architecture (NEW SECTION)
+
+### 7.5.1 Agent Identity & Stake
+```protobuf
+message AgentIdentity {
+  string did = 1;                    // did:hydrogen:agent:xyz
+  string hotkey = 2;                 // Bittensor hotkey
+  uint64 stake = 3;                  // Staked TAO (nanoTAO)
+  uint64 reputation = 4;             // Scaled 1e6
+  repeated string capabilities = 4;  // ["ns_solver", "phase_field", "optimizer_tuning"]
+  string parent_agent = 5;           // Parent DID for lineage/forking
+  uint64 created_at = 6;
+  uint64 stake_locked_until = 7;     // Block number
+}
+
+message AgentRegistration {
+  string did = 1;
+  uint64 stake = 2;
+  repeated string capabilities = 3;
+  bytes signature = 4;  // Signed by hotkey
+}
+```
+
+### 7.5.2 Agent-to-Agent Protocol (A2A)
+```protobuf
+message AgentMessage {
+  string from_did = 1;
+  string to_did = 2;
+  MessageType type = 3;
+  bytes payload = 4;
+  uint64 nonce = 5;
+  bytes signature = 6;
+  uint64 timestamp = 7;
+}
+
+enum MessageType {
+  PROPOSE = 0;        // Propose strategy/config
+  CRITIQUE = 1;       // Critique peer's strategy
+  KNOWLEDGE_SHARE = 2; // Share PDE discovery/insight
+  CHALLENGE = 3;      // Challenge peer's result
+  VOTE = 4;           // Vote on specialist promotion
+  FORK_KNOWLEDGE = 5; // Fork knowledge graph
+  MERGE_KNOWLEDGE = 6; // Merge knowledge graphs
+}
+```
+
+**A2A Flow:**
+1. Agent A → Agent B: `PROPOSE` strategy for challenge X
+2. Agent B → Agent A: `CRITIQUE` with physics-gate feedback
+3. Agent A → Agent B: `KNOWLEDGE_SHARE` (discovered PDE pattern)
+3. Swarm votes on specialist promotion via `VOTE` messages
+
+### 7.5.3 Swarm Intelligence & Coordination
+```protobuf
+message SwarmConfig {
+  string challenge_family = 1;  // e.g., "navier_stokes", "phase_field"
+  repeated string member_dids = 2;
+  uint32 min_quorum = 3;
+  uint32 max_members = 20;
+  VoteMechanism vote_mechanism = 4;
+}
+
+enum VoteMechanism {
+  MAJORITY = 0;
+  WEIGHTED_BY_REPUTATION = 1;
+  UNANIMOUS = 2;
+}
+
+message SwarmVote {
+  string specialist_id = 1;
+  string voter_did = 2;
+  bool approve = 3;
+  string rationale = 4;
+  uint64 timestamp = 5;
+}
+```
+
+**Swarm Coordination:**
+- Agents form swarms per challenge family (NS, phase-field, elasticity, etc.)
+- Swarm votes on specialist promotion (weighted by reputation)
+- Fork/merge knowledge graphs for parallel exploration
+- Knowledge graph stored as IPFS Merkle DAG (Merkle DAG of StrategyFragments)
+
+### 7.5.3 Agent Incentives
+| Incentive | Mechanism | Reward |
+|-----------|-----------|--------|
+| **Stake-to-Participate** | Stake TAO to join; slashed for invalid physics | Access to challenges |
+| **Discovery Reward** | Novel PDE discovery (validated by Landscape) | 0.5% of challenge budget |
+| **Architecture Innovation** | Novel architecture beating baseline by >5% | 1% of challenge budget |
+| **Validation Reward** | Verifying peer's specialist (independent reproduction) | 0.2% of challenge budget |
+| **Curation Reward** | Curating high-quality custom datasets | Data royalty pool (5% emissions) |
+| **Reputation Bonus** | Top 10% reputation | Priority challenge access, fee discount |
+
+**Slashing Conditions:**
+| Offense | Slash Amount |
+|---------|-------------|
+| Invalid physics (gate failure) | 10% stake |
+| Spam/flooding | 5% stake |
+| Malicious critique (proven false) | 20% stake |
+| Knowledge poisoning (false PDE) | 50% stake + ban |
+
+### 7.5.3 Human-in-the-Loop (HITL) API
+```python
+# REST API for human supervisors
+POST /api/v1/human/approve
+{
+  "agent_did": "did:hydrogen:agent:xyz",
+  "submission_id": "sub_abc123",
+  "decision": "approve|reject|request_changes",
+  "comments": "Increase physics loss weight for mass conservation"
+}
+
+POST /api/v1/human/intervene
+{
+  "challenge_id": "ns_2d_v1_0042",
+  "intervention_type": "override_physics_gate|adjust_baseline|halt_challenge",
+  "parameters": {"mass_conservation_threshold": 1e-4},
+  "reason": "Stricter mass conservation needed for this regime"
+}
+
+GET /api/v1/human/audit/{agent_did}
+# Returns: agent history, slashing events, discoveries, reputation trajectory
+```
+
+### 7.5.4 Agent Lifecycle
+```
+SPAWN → STAKE → COMPETE → REPRODUCE/DIE
+   │           │           │           │
+   │           │           │           └── Death: stake returned (minus slashes), knowledge archived
+   │           │           │
+   │           │           └── Compete: submit strategies, earn reputation
+   │           │
+   │           └── Stake: lock TAO, register DID, join swarms
+   │
+   └── Spawn: generate DID, register capabilities, stake minimum TAO
+```
+
+**Reproduction:** High-reputation agents can "spawn" child agents with inherited knowledge graph (forked Merkle DAG), inheriting 10% parent stake.
+
+### 7.5.4 Human-in-the-Loop (HITL) API
+```yaml
+# REST API for human supervisors
+POST /api/v1/human/approve
+{
+  "agent_did": "did:hydrogen:agent:xyz",
+  "submission_id": "sub_abc123",
+  "decision": "approve|reject|request_changes",
+  "comments": "Increase physics loss weight for mass conservation"
+}
+
+POST /api/v1/human/intervene
+{
+  "challenge_id": "ns_2d_v1_0042",
+  "intervention_type": "override_physics_gate|adjust_baseline|halt_challenge",
+  "parameters": {"mass_conservation_threshold": 1e-4},
+  "reason": "Stricter mass conservation needed for this regime"
+}
+
+GET /api/v1/human/audit/{agent_did}
+# Returns: agent history, slashing events, discoveries, reputation trajectory
+
+POST /api/v1/human/override_gate
+{
+  "challenge_id": "ns_2d_v1_0042",
+  "gate": "mass_conservation",
+  "new_threshold": 5e-4,
+  "duration_blocks": 1000
+}
+```
+
+### 7.5.4 Agent Lifecycle & Incentives
+
+**Lifecycle:** `SPAWN → STAKE → COMPETE → REPRODUCE/DIE`
+
+| Phase | Action | Stake/Slash |
+|---------|--------|-------------|
+| **SPAWN** | Generate DID, register capabilities, stake minimum TAO (1000 TAO) | Lock stake |
+| **STAKE** | Register capabilities, join swarms | Stake locked |
+| **COMPETE** | Submit strategies, critique peers, vote on specialists | Earn rewards, risk slashing |
+| **REPRODUCE** | Fork knowledge graph, spawn child agent with 10% stake inheritance | Parent stakes additional 100 TAO |
+| **DIE** | Voluntary exit or slashing to zero | Stake returned (minus slashes) |
+
+**Incentive Structure:**
+| Action | Reward | Source |
+|--------|--------|--------|
+| Novel PDE discovery (validated) | 0.5% challenge budget | Novelty pool |
+| Novel architecture (>5% improvement) | 1% challenge budget | Innovation pool |
+| Peer validation (reproduce specialist) | 0.2% challenge budget | Validation pool |
+| Curation (high-quality custom data) | Data royalty pool (5% emissions) | Data royalty pool |
+| Swarm participation | Reputation points | Reputation |
+
+**Slashing Conditions:**
+| Offense | Slash |
+|---------|-------|
+| Invalid physics (gate failure) | 10% stake |
+| Spam/flooding | 5% stake |
+| Malicious critique (proven false) | 20% stake |
+| Knowledge poisoning (false PDE) | 50% stake + ban |
+
+---
+
+## 8. Specialist Bank & Marketplace (UPDATED)
 
 ### 8.1 Specialist Metadata
 ```protobuf
@@ -714,22 +1012,23 @@ challenge_budget = total_subnet_emission / min(active_challenges, 10)
 
 ---
 
-## 12. Phase Definitions
+## 12. Phase Definitions (Condensed)
 
 ### Phase 0: The Causal Baseline (Launch → Month 3)
 **Challenges:** 7 single-physics PDEs (Poisson 2D/3D, Darcy 2D/3D, Burgers, NS 2D/3D laminar, Heat, Elasticity, Thermo-elasticity)
-
-**What Happens:** Miners submit strategy JSONs; validators train, evaluate, stress-test; Landscape builds causal fragment DAG, proposes daily baseline updates.
-
-**Product:** Causal Knowledge Graph — 500+ causally-validated interventions across 7 PDE problems.
-
-**Revenue:** $2-5M/yr licensing causal knowledge graph.
 
 **Symbolic Milestones:**
 - [ ] ModelingToolkit integration in validator pipeline
 - [ ] Symbolic feature extraction per challenge (symmetries, conservation, dimless groups)
 - [ ] Automatic loss weight computation from symbolic metadata
 - [ ] Symbolic-aware physics gates
+
+### Phase 1: Specialist Bank & Data Markets (Months 3-6)
+**Symbolic Milestones:**
+- [ ] Specialist distillation with symbolic metadata preservation
+- [ ] Symbolic metadata extraction from teacher ensemble
+- [ ] Symbolic metadata attached to distilled specialists
+- [ ] Symbolic regression (DataDrivenDiffEq) for PDE discovery
 
 ### Phase 1: Specialist Bank & Data Markets (Months 3-6)
 **Challenges:** Same 7 problems. Miners add LoRA adapters and custom datasets.
@@ -746,91 +1045,10 @@ challenge_budget = total_subnet_emission / min(active_challenges, 10)
 - [ ] Symbolic metadata attached to distilled specialists
 - [ ] Symbolic regression (DataDrivenDiffEq) for PDE discovery
 
-### Phase 2: Composition Engine & Specialist Marketplace (Months 6-18)
-**Phase 2A (Months 1-3): Verified Benchmarks Only**
-| Challenge | Source | Physics | Specialist Pair |
-|-----------|--------|---------|-----------------|
-| FSI 2D-1/2/3 | Turek/Hron | Fluid-Structure Interaction | `ns_2d` + `elasticity_2d` + `fsi_coupling` |
-| CHT: Solid cooling / Electronics | PDEBench | Conjugate Heat Transfer | `ns_2d` + `heat_2d` + `cht_coupling` |
-
-**Phase 2B (Month 3):** Thermo-Elasticity. Generate 48 Tier-1 references (β×κ×geometry) at 256² with FEniCS monolithic, mesh-converged. Cost: ~$3K.
-
-**Phase 2C (Months 4-5):** Variant expansion (new Re, geometries, coupling strengths) on FSI/CHT/thermo-elasticity using existing references.
-
-**Product:** Proven composition > monolith. Specialist Bank (50+ specialists) composable via adapters. Data royalty market.
-
-**Revenue:** $50-200M/yr composition engine licensing, custom pipelines, marketplace fees.
-
-**Symbolic Milestones:**
-- [ ] Symbolic Composition: Acausal specialist composition via MTK
-- [ ] Symbolic metadata enables automatic compatibility checking
-- [ ] Acausal composition → auto-generates coupled PDEs
-- [ ] Symbolic Composition track in leaderboard
-
-### Phase 3: 3D Transition & Foundation Operator (Months 18+)
-
-#### Phase 3.0: 3D Single-Physics Foundations (Prerequisite)
-3D Poisson, Darcy, NS-laminar, Heat, Elasticity via curriculum distillation from 2D.
-
-#### Phase 3.1: 3D Turbulence Bridge (Critical - Months 1-3)
-**Dedicated phase to learn 3D turbulence FROM SCRATCH.**
-- 3D Spectral Initialization Protocol (proper 3D energy spectrum priors, NOT zero-pad)
-- 3D Turbulence Curriculum: Re=50→100→200→500 on channel/cylinder
-- `ns_3d_turbulent_v1` with verified k^(-5/3) energy spectrum
-- 3D-specific stress gates: energy spectrum (k^(-5/3)), Q-criterion, wall shear, Nu distribution
-- **Gate:** `ns_3d_turbulent_v1` passes all 3D turbulence stress tests → open 3D multi-physics
-
-#### Phase 3.2: 3D Multi-Physics Rollout
-| Phase | Challenges | Specialist Composition | Reference |
-|-------|------------|------------------------|-----------|
-| **3.2A** 3D FSI | Cylinder, flap, turbulent | `ns_3d_turbulent` + `elasticity_3d` + `fsi_3d_adapter` | preCICE partitioned |
-| **3.2B** 3D Thermo-Elasticity | Bimetal, engine, turbine | `elasticity_3d` + `heat_3d` + `thermal_expansion_3d` | FEniCS monolithic |
-| **3.2C** 3D CHT | Electronics, turbine, battery | `ns_3d_turbulent` + `heat_3d` + `cht_3d_adapter` | OpenFOAM/COMSOL |
-
-#### Phase 3.3: Foundation Operator (LPM)
-Multi-teacher distillation across entire Specialist Bank (2D + 3D). FiLM conditioning, evidential UQ, commercial fine-tuning API.
-
-**Revenue:** $1B+ TAM. Foundation Operator API, custom surrogates, enterprise physics infrastructure.
-
-**Symbolic Milestones:**
-- [ ] Multi-teacher distillation across entire Specialist Bank (2D + 3D)
-- [ ] FiLM conditioning on ProblemSignature + SymbolicMetadata
-- [ ] Evidential UQ head (μ, σ, ν, α for Student-t)
-- [ ] Commercial fine-tuning API: TEE decryption → LoRA rank=8 (10-50 steps) → stress test verification → encrypted ONNX return
-- [ ] LPM fine-tuning API commercial launch
-
----
-
-## 13. Implementation Checklist
-
-### Phase 0: The Causal Baseline (Launch → Month 3)
-- [ ] 5 backbone Docker images built & tested (`fno`, `pino`, `deeponet`, `gno`, `oformer`)
-- [ ] 7 challenge datasets generated + stress floors calibrated (Poisson 2D/3D, Darcy 2D/3D, Burgers, NS 2D/3D laminar, Heat, Elasticity, Thermo-elasticity)
-- [ ] Validator pipeline: train → evaluate → stress test → score (median consensus, 3+ validators)
-- [ ] Miner CLI: submit JSON, pay 0.1 TAO fee, query results
-- [ ] Chain pallet: challenge management, scoring consensus, per-challenge emission budget (40/30/20/10 split)
-- [ ] Landscape Agent: fragment store, DML causal inference, daily baseline proposer
-- [ ] Dashboard: live leaderboard, fragment explorer, causal graph
-
-**Symbolic Milestones:**
-- [ ] ModelingToolkit integration in validator pipeline
-- [ ] Symbolic feature extraction per challenge (symmetries, conservation, dimless groups)
-- [ ] Automatic loss weight computation from symbolic metadata
-- [ ] Symbolic-aware physics gates
-
-### Phase 1: Specialist Bank & Data Markets (Months 3-6)
-- [ ] LoRA adapter support in validator (rank-4-8, target layer selection)
-- [ ] Custom data ingestion + caching + data royalty pool (5% of emissions)
-- [ ] Specialist distillation pipeline: multi-teacher → ONNX export → regression test (same stress tests)
-- [ ] Dual-license legal framework (AGPL-3.0 + Commercial)
-- [ ] Specialist Bank on-chain registry (specialist_id, onnx_model, validity_domain, license)
-- [ ] Miner CLI: `custom_data` submission, `uq_config` support
-
-**Symbolic Milestones:**
-- [ ] Specialist distillation with symbolic metadata preservation
-- [ ] Symbolic metadata extraction from teacher ensemble
-- [ ] Symbolic metadata attached to distilled specialists
-- [ ] Symbolic regression (DataDrivenDiffEq) for PDE discovery
+### Phase 1: Abaqus Ingestion (NEW)
+- [ ] Abaqus ODB/fil ingestion pipeline operational
+- [ ] Abaqus data integrated into custom data pipeline
+- [ ] Abaqus data usable for custom_data.custom_data.usage = "augment"
 
 ### Phase 2: Composition Engine & Specialist Marketplace (Months 6-18)
 **Phase 2A (Months 6-9): Verified Benchmarks**
@@ -1029,7 +1247,3 @@ Phase 0-1: UQ target 90%, rollout 100 steps
 Phase 2:   UQ target 95%, rollout 100 steps  
 Phase 3:   UQ target 99%, rollout 1000 steps + spectral stationarity
 ```
-
----
-
-*End of SPEC.md v2.2*
