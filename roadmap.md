@@ -71,7 +71,7 @@ Establish the causal flywheel: miners submit strategies → validators verify wi
 
 ### Revenue at Phase 0 Exit
 - **Asset:** Causal Knowledge Graph (500+ causally-validated interventions across 7 PDE problems)
-- **TAM:** $2-5M/yr licensing to NVIDIA/ANSYS/Siemens for "training best practices" datasets
+- **TAM:** licensing to NVIDIA/ANSYS/Siemens for "training best practices" datasets
 - **Revenue model:** API access to causal graph + baseline configs
 
 ---
@@ -124,9 +124,8 @@ Enable fine-grained innovation (adapters), reward data contribution, produce fir
 
 ### Revenue at Phase 1 Exit
 - **Asset:** Specialist Bank (20-30 verified ONNX specialists, dual-licensed)
-- **TAM:** $10-50M/yr
+- **TAM:** 
   - Specialist licensing (AGPL-3.0 ecosystem + commercial dual-license)
-  - Data royalties from custom datasets (The Well as primary source)
   - Fine-tuning services on encrypted client data (TEE)
 
 ---
@@ -273,7 +272,7 @@ New Re, geometries, coupling strengths on FSI/CHT/thermo-elasticity using existi
 
 ### Revenue at Phase 2 Exit
 - **Asset:** Composition Engine + Specialist Bank (50+ specialists, composable)
-- **TAM:** $50-200M/yr
+- **TAM:** 
   - Specialist licensing (AGPL-3.0 + commercial)
   - Composition engine licensing (COMSOL, Ansys, Siemens)
   - Custom multi-physics pipelines for enterprise ($10M-100M contracts)
@@ -415,10 +414,10 @@ def fine_tune_lpm(client_encrypted_data, problem_signature):
 
 | Phase | Primary Asset | Revenue Streams | TAM | Timeline |
 |-------|---------------|-----------------|-----|----------|
-| **Phase 0** | Causal Knowledge Graph | Licensing to NVIDIA/ANSYS/Siemens | $2-5M/yr | Month 3 |
-| **Phase 1** | Specialist Bank (20-30) | Licensing (dual), data royalties, fine-tuning API | $10-50M/yr | Month 6 |
-| **Phase 2** | Composition Engine + Bank (50+) | Licensing, custom pipelines, enterprise contracts | $50-200M/yr | Month 12-18 |
-| **Phase 3** | Foundation Operator (LPM) | API ($500-5K/model), custom surrogates ($50K-500K), enterprise platform | $1B+ | Year 2-3 |
+| **Phase 0** | Causal Knowledge Graph | Licensing to NVIDIA/ANSYS/Siemens | Month 3 |
+| **Phase 1** | Specialist Bank (20-30) | Licensing (dual), data royalties, fine-tuning API | Month 6 |
+| **Phase 2** | Composition Engine + Bank (50+) | Licensing, custom pipelines, enterprise contracts | Month 12-18 |
+| **Phase 3** | Foundation Operator (LPM) | API ($500-5K/model), custom surrogates ($50K-500K), enterprise platform | Year 2-3 |
 
 ---
 
@@ -450,11 +449,9 @@ def fine_tune_lpm(client_encrypted_data, problem_signature):
 ### Emission Mechanics (All Phases)
 - **Challenge Budget:** `total_emission / min(active_challenges, 10)`
 - **Top-4 Split:** 40% / 30% / 20% / 10%
-- **Novelty Bonus:** 5% of challenge budget, physics-informed embeddings, **only if improvement > 0**
 - **Bounty Accumulation:** Emissions pool until log-improvement > 0
 - **Private-until-proven:** Strategies revealed only after earning rewards
 - **Miner burn:** 0%
-- **Warm-up:** <10 submissions/challenge → top 3 split 50/30/20
 
 ### Phase-Gated Physics Requirements
 
@@ -503,27 +500,3 @@ def get_phase_targets(phase):
     else: return {"uq_target": 0.99, "rollout_steps": 1000}
 ```
 
----
-
-## Revenue & TAM Summary by Phase
-
-| Phase | Primary Asset | Revenue Streams | TAM | Timeline |
-|-------|---------------|-----------------|-----|----------|
-| **Phase 0** | Causal Knowledge Graph | Licensing to NVIDIA/ANSYS/Siemens | $2-5M/yr | Month 3 |
-| **Phase 1** | Specialist Bank (20-30) | Licensing (dual), data royalties, fine-tuning API | $10-50M/yr | Month 6 |
-| **Phase 2** | Composition Engine + Bank (50+) | Licensing, custom pipelines, enterprise contracts | $50-200M/yr | Month 12-18 |
-| **Phase 3** | Foundation Operator (LPM) | API ($500-5K/model), custom surrogates ($50K-500K), enterprise platform | $1B+ | Year 2-3 |
-
----
-
-## Risk Mitigation & Pivot Points
-
-| Risk | Probability | Mitigation | Pivot Trigger |
-|------|-------------|------------|---------------|
-| 3D turbulence bridge fails | High | 2D composition thesis proven; 3D elliptic/parabolic specialists valuable | Pivot: double down on Phase 2 composition engine + elliptic/parabolic specialists |
-| 3D reference costs exceed budget | Medium | Tiered fidelity (gold/silver/bronze); 2D→3D curriculum reduces training cost | Reduce 3D challenge frequency; focus on 2D/3D elliptic |
-| Validator centralization (24GB+ GPU requirement) | Medium | Fee adjustment; validator emission increase; cloud validator program | Increase submission fee; validator emission share increase |
-| Reference solver uncertainty | High | Tiered fidelity (gold/silver/bronze); cross-code verification for Tier 1 | Accept lower-fidelity stress tests; flag in metadata |
-| Miner exodus | Low | Landscape has 500+ fragments → specialists → Foundation Operator survives | Emissions become "innovation bonus"; revenue from IP sustains |
-
----
