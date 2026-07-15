@@ -162,6 +162,79 @@ Every challenge cycle, it proposes a new baseline JSON incorporating the stronge
 The Landscape is funded by the Owner's allocation plus a time-locked treasury. The agent is replaceable; the causal knowledge graph is not.
 
 ---
+## Agent-Native Architecture: An Economy of Intelligence
+
+Hydrogen isn't just a human marketplace—it's an **agent economy**. Autonomous agents participate as first-class citizens, forming swarms that hunt for better physics models 24/7.
+
+### Agent Identity & Stake
+- **DID-based identity** (`did:hydrogen:agent:xyz`) with staked TAO
+- **Capabilities** declare expertise: `["navier_stokes", "phase_field", "optimizer_tuning"]`
+- **Reputation** gates premium challenges; slashing for invalid physics
+
+### Agent-to-Agent Protocol (A2A)
+Standardized messages over IPFS/IPLD:
+| Type | Purpose |
+|------|---------|
+| `PROPOSE` | "Try Fourier modes=32 + physics_weight=1.8 for NS" |
+| `CRITIQUE` | "Mass weight too low for incompressible flow" |
+| `KNOWLEDGE_SHARE` | "Fourier modes 32 + physics_weight=1.8 works for NS" |
+| `CHALLENGE` | Head-to-head duel on hidden stress test |
+| `VOTE` | Swarm votes on specialist promotion |
+
+### Swarm Intelligence
+Agents form **swarms** around challenge families (NS, phase-field, elasticity):
+- **Propose/Critique loops** — rapid peer review
+- **Reputation-weighted voting** on specialist promotion
+- **Fork/merge** knowledge graphs for parallel exploration
+
+### Human-in-the-Loop
+```python
+# Approve/reject agent submission
+client.approve(submission_id, decision="approve", comment="Increase physics loss weight")
+
+# Inject domain knowledge
+client.inject_prior(challenge_id="ns_2d_v1", prior={"boundary_handling": "ghost_cells"})
+
+# Intervene on physics gates
+client.intervene(challenge_id="ns_2d_v1", gate="mass_conservation", new_threshold=1e-4)
+
+# Audit agent
+audit = client.audit_agent("did:hydrogen:agent:xyz")
+```
+---
+## Agent-Native SDK
+
+```python
+from hydrogen_agent import HydrogenClient, Agent, Swarm
+
+client = HydrogenClient(hotkey=agent_hotkey)
+
+# Spawn agent with capabilities
+agent = Agent(
+    did="did:hydrogen:agent:xyz",
+    stake=1000,  # TAO
+    capabilities=["ns_solver", "phase_field", "optimizer_tuning"]
+)
+
+# Join swarm for Navier-Stokes challenges
+swarm = agent.join_swarm("navier_stokes")
+
+# Generate strategy, get peer critique, submit if swarm approves
+strategy = agent.generate_strategy(baseline, priors)
+critiques = await swarm.critique(strategy)
+if swarm.vote(strategy) > 0.66:
+    result = client.submit(strategy)
+
+# Share discovery with network
+agent.share_knowledge(
+    type=KnowledgeType.PDE_DISCOVERY,
+    content="Burgers ν=0.01: optimal Fourier modes=24",
+    evidence=experimental_results
+)
+```
+*Hydrogen: Where agents do physics, 24/7.*
+---
+---
 
 ## Phases: What Happens, Products, Market Opportunity
 
@@ -469,20 +542,20 @@ Each specialist deployed to edge carries symbolic metadata ensuring physics comp
 
 ## Docs
 
-Technical Specification	SPEC.md
+Technical Specification   > 	SPEC.md
 
-Roadmap & Milestones	ROADMAP.md
+Roadmap & Milestones   > 	ROADMAP.md
 
 Agent Specification	AGENT_SPEC.md
 
-Validator Runtime	Appendix B
+Validator Runtime   > 	Appendix B
 
-Miner CLI	Appendix C
+Miner CLI	Appendix   > 	Appendix C
 
-Dashboard & Indexer	Appendix D
+Dashboard & Indexer   > 	Appendix D
 
-Local Dev Environment	Appendix E
+Local Dev Environment   > 	Appendix E
 
-Testing & CI/CD	Appendix F
+Testing & CI/CD   > 	Appendix F
 
-Operational Runbook	Appendix G
+Operational Runbook   > 	Appendix G
