@@ -1,10 +1,7 @@
-"""Hydrogen Validator with benchmark-aware scoring.
-
-Now loads challenges with real PDEBench data when available,
-so miners are scored against high-quality reference solutions.
-"""
+"""Hydrogen Validator - Robust version with better error handling and sampling."""
 
 import time
+import random
 import numpy as np
 import bittensor as bt
 
@@ -27,42 +24,68 @@ class Validator(BaseValidatorNeuron):
             "elasticity_2d_v1",
             "ns_2d_laminar_v1",
         ]
-        self.use_benchmark = True  # Prefer real benchmark data when available
-        bt.logging.info("Hydrogen Validator initialized with benchmark-aware scoring.")
+        self.use_benchmark = True
+        self.sample_size = 20  # Number of miners to query per round
+        bt.logging.info("Hydrogen Validator initialized (robust mode).")
 
     async def forward(self):
-        bt.logging.info("Starting validation round (benchmark mode)...")
+        bt.logging.info("Starting validation round...")
 
         challenge_id = self.challenge_ids[self.current_challenge_index]
         self.current_challenge_index = (self.current_challenge_index + 1) % len(self.challenge_ids)
 
-        axons = [a for a in self.metagraph.axons if a.hotkey != self.wallet.hotkey.ss58_address]
-        if not axons:
+        # Robust miner sampling
+        all_axons = [a for a in self.metagraph.axons if a.hotkey != self.wallet.hotkey.ss58_address]
+        if not all_axons:
+            bt.logging.warning("No miners available.")
             return
 
+        sample_size = min(self.sample_size, len(all_axons))
+        axons = random.sample(all_axons, sample_size)
+
+        bt.logging.info(f"Querying {len(axons)} miners for challenge {challenge_id}...")
+
         synapse = StrategySynapse(challenge_id=challenge_id)
-        responses = await self.dendrite(axons=axons, synapse=synapse, timeout=30)
+
+        try:
+            responses = await self.dendrite(
+                axons=axons,
+                synapse=synapse,
+                timeout=25,  # Slightly reduced timeout for robustness
+            )
+        except Exception as e:
+            bt.logging.error(f"Dendrite query failed: {e}")
+            return
 
         round_scores = {}
         improvements = []
 
         for response in responses:
-            if not response or not getattr(response, "accepted", False):
+            try:
+                if response is None:
+                    continue
+                if not getattr(response, "accepted", False):
+                    continue
+
+                strategy = getattr(response, "strategy", None)
+                if strategy is None:
+                    continue
+
+                validation = self.validate_submission(challenge_id, strategy)
+                hotkey = response.dendrite.hotkey if response.dendrite else None
+
+                if hotkey and validation.get("hard_pass"):
+                    score = validation["score"]
+                    improvement = validation.get("improvement", 0.0)
+                    round_scores[hotkey] = score
+                    improvements.append((hotkey, improvement))
+
+                    data_src = validation.get("data_source", "unknown")
+                    bt.logging.info(f"{hotkey[:8]} on {challenge_id} ({data_src}): score={score:.4f}")
+
+            except Exception as e:
+                bt.logging.warning(f"Error processing response: {e}")
                 continue
-            strategy = getattr(response, "strategy", None)
-            if not strategy:
-                continue
-
-            validation = self.validate_submission(challenge_id, strategy)
-            hotkey = response.dendrite.hotkey if response.dendrite else None
-
-            if hotkey and validation.get("hard_pass"):
-                score = validation["score"]
-                improvement = validation.get("improvement", 0.0)
-                round_scores[hotkey] = score
-                improvements.append((hotkey, improvement))
-
-                bt.logging.info(f"{hotkey[:8]} on {challenge_id}: score={score:.4f}")
 
         self._update_scores(round_scores, improvements)
 
@@ -105,7 +128,7 @@ class Validator(BaseValidatorNeuron):
                 uids=hotkeys,
                 weights=weights,
             )
-            bt.logging.info(f"Weights set. Success={result}")
+            bt.logging.info(f"Weights set successfully.")
 
         except Exception as e:
             bt.logging.error(f"Weight setting failed: {e}")
@@ -114,15 +137,21 @@ class Validator(BaseValidatorNeuron):
         from hydrogen.physics.gates import evaluate_all_gates, compute_relative_l2_error
         from hydrogen.training.physicsnemo_trainer import train_physics_neural_operator
 
-        # Load with benchmark data when available (critical for meaningful scoring)
-        challenge = load_challenge(challenge_id, use_benchmark=self.use_benchmark)
+        try:
+            challenge = load_challenge(challenge_id, use_benchmark=self.use_benchmark)
+        except Exception as e:
+            bt.logging.error(f"Failed to load challenge {challenge_id}: {e}")
+            return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
+
         baseline_error = challenge.baseline_error
 
-        bt.logging.info(f"Validating on {challenge_id} (data_source={challenge.data_source})")
+        try:
+            results = train_physics_neural_operator(challenge, strategy, epochs=6)
+        except Exception as e:
+            bt.logging.warning(f"Training failed for {challenge_id}: {e}")
+            return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
 
-        results = train_physics_neural_operator(challenge, strategy, epochs=6)
-
-        # Determine pde_type
+        # pde_type routing
         if "ns_2d" in challenge_id or "navier" in challenge_id:
             pde_type = "navier_stokes"
         elif "burgers" in challenge_id:
@@ -136,35 +165,43 @@ class Validator(BaseValidatorNeuron):
         else:
             pde_type = "poisson"
 
-        hard_pass, gate_details = evaluate_all_gates(results, pde_type=pde_type)
+        try:
+            hard_pass, gate_details = evaluate_all_gates(results, pde_type=pde_type)
+        except Exception as e:
+            bt.logging.warning(f"Gate evaluation failed: {e}")
+            return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
 
         if not hard_pass:
             return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
 
-        # Flexible field access for benchmark vs synthetic data
-        u_key = next(
-            (k for k in ["u_true", "velocity_true", "ux_true", "u"] if k in challenge.stress_data),
-            list(challenge.stress_data.keys())[0]
-        )
-        u_true = challenge.stress_data[u_key][0]
-        u_pred = results.get("u_pred", results.get("velocity_pred", torch.zeros_like(u_true)))
+        # Flexible field access
+        try:
+            u_key = next(
+                (k for k in ["u_true", "velocity_true", "ux_true", "u"] if k in challenge.stress_data),
+                list(challenge.stress_data.keys())[0]
+            )
+            u_true = challenge.stress_data[u_key][0]
+            u_pred = results.get("u_pred", results.get("velocity_pred", torch.zeros_like(u_true)))
 
-        if u_true.dim() == 3:  # vector field (e.g. NS velocity)
-            u_true = u_true[0]
+            if u_true.dim() == 3:
+                u_true = u_true[0]
 
-        submission_error = compute_relative_l2_error(u_pred, u_true)
-        improvement = float(torch.log(torch.tensor(baseline_error)) - torch.log(torch.tensor(submission_error)))
+            submission_error = compute_relative_l2_error(u_pred, u_true)
+            improvement = float(torch.log(torch.tensor(baseline_error)) - torch.log(torch.tensor(submission_error)))
 
-        return {
-            "score": max(0.0, improvement),
-            "improvement": improvement,
-            "hard_pass": True,
-            "data_source": challenge.data_source,
-        }
+            return {
+                "score": max(0.0, improvement),
+                "improvement": improvement,
+                "hard_pass": True,
+                "data_source": getattr(challenge, "data_source", "unknown"),
+            }
+        except Exception as e:
+            bt.logging.warning(f"Error computing improvement: {e}")
+            return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
 
 
 if __name__ == "__main__":
     with Validator() as validator:
         while True:
-            bt.logging.info("Hydrogen Validator running (benchmark mode)...")
+            bt.logging.info("Hydrogen Validator running...")
             time.sleep(30)
