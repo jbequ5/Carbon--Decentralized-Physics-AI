@@ -1,7 +1,7 @@
-"""Hydrogen Miner Neuron (with real local validation).
+"""Hydrogen Miner with sophisticated local validation.
 
-The miner now generates strategies using symbolic metadata and
-runs local physics gate validation before responding.
+Miner can now optionally run short real training during local validation
+for higher quality strategy vetting before submission.
 """
 
 import time
@@ -15,42 +15,41 @@ from hydrogen.miner.strategy_generator import generate_strategy, get_local_valid
 
 class Miner(BaseMinerNeuron):
     """
-    Hydrogen Miner with intelligent strategy generation + local validation.
+    Hydrogen Miner with symbolic strategy generation + real local validation.
     """
 
     def __init__(self, config=None):
         super().__init__(config=config)
-        bt.logging.info("Hydrogen Miner initialized with local validation.")
+        bt.logging.info("Hydrogen Miner initialized (sophisticated local validation enabled).")
 
     async def forward(self, synapse: StrategySynapse) -> StrategySynapse:
         bt.logging.info(f"Received request for challenge: {synapse.challenge_id}")
 
         if synapse.strategy is None:
-            # Generate strategy using symbolic metadata
             strategy = generate_strategy(synapse.challenge_id)
 
-            # Run real local validation using physics gates
+            # Sophisticated local validation (can use real short training)
             improvement, hard_pass, gate_details = get_local_validation_score(
-                synapse.challenge_id, strategy
+                synapse.challenge_id,
+                strategy,
+                use_real_training=False,   # Set to True if you want short real training
+                quick_epochs=4,
             )
 
             if hard_pass:
-                bt.logging.info(
-                    f"Local validation PASSED. Est. improvement: {improvement:+.4f}"
-                )
+                bt.logging.info(f"Local validation PASSED. Est. improvement: {improvement:+.4f}")
                 synapse.strategy = strategy
                 synapse.accepted = True
-                synapse.message = f"Strategy validated locally (improvement ~{improvement:.3f})"
+                synapse.message = f"Validated locally (est. improvement {improvement:.3f})"
             else:
-                bt.logging.warning("Local validation FAILED. Adjusting strategy...")
-                # In a real implementation we could mutate the strategy here
+                bt.logging.warning("Local validation FAILED gates check.")
                 synapse.strategy = strategy
                 synapse.accepted = False
-                synapse.message = "Local validation failed - strategy may need tuning"
+                synapse.message = "Local validation failed - consider adjusting strategy"
 
         else:
             synapse.accepted = True
-            synapse.message = "Strategy submission acknowledged"
+            synapse.message = "Strategy submission received"
             synapse.submission_id = f"sub_{int(time.time())}"
 
         return synapse

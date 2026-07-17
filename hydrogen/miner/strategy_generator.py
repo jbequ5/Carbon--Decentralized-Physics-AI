@@ -1,11 +1,17 @@
-"""Strategy generation logic for Hydrogen miners.
+"""Strategy generation + local validation for Hydrogen miners.
 
-Now includes real local validation using the physics gates.
+Local validation now supports real (short) PhysicsNeMo training for more accurate scoring.
 """
 
 from typing import Dict, Any, Tuple
 
 import torch
+
+try:
+    from hydrogen.training.physicsnemo_trainer import train_physics_neural_operator
+    PHYSICSNEMO_AVAILABLE = True
+except ImportError:
+    PHYSICSNEMO_AVAILABLE = False
 
 from hydrogen.challenges.poisson_2d import load_challenge
 from hydrogen.physics.gates import evaluate_all_gates, compute_relative_l2_error
@@ -13,7 +19,7 @@ from hydrogen.physics.gates import evaluate_all_gates, compute_relative_l2_error
 
 def generate_strategy(challenge_id: str = "poisson_2d_v1") -> Dict[str, Any]:
     """
-    Generate a strategy dict for a given challenge using symbolic metadata.
+    Generate a strategy using symbolic metadata from the challenge.
     """
     try:
         challenge = load_challenge(challenge_id)
@@ -22,7 +28,7 @@ def generate_strategy(challenge_id: str = "poisson_2d_v1") -> Dict[str, Any]:
     except Exception:
         suggested_weights = {"pde_residual": 1.0, "boundary": 0.8}
 
-    strategy = {
+    return {
         "backbone": "PINO",
         "resolution": [128, 128],
         "pino": {
@@ -46,45 +52,51 @@ def generate_strategy(challenge_id: str = "poisson_2d_v1") -> Dict[str, Any]:
         },
         "auto_loss_weights": True,
     }
-    return strategy
 
 
 def get_local_validation_score(
-    challenge_id: str, strategy: dict
+    challenge_id: str,
+    strategy: dict,
+    use_real_training: bool = False,
+    quick_epochs: int = 4,
 ) -> Tuple[float, bool, Dict[str, Any]]:
     """
-    Run a lightweight local validation using the physics gates.
+    Perform local validation of a strategy.
 
-    Returns:
-        (estimated_improvement, would_pass_gates, gate_details)
+    If use_real_training=True and PhysicsNeMo is available, it will run a short
+    training loop (quick_epochs) then evaluate gates. Otherwise falls back to
+    simulated prediction.
+
+    Returns: (improvement, hard_pass, gate_details)
     """
     try:
         challenge = load_challenge(challenge_id)
 
-        # Create a simulated prediction (in real version this would come from
-        # a quick forward pass or short training run)
-        stress = challenge.stress_data
-        u_true = stress["u_true"][0]
+        if use_real_training and PHYSICSNEMO_AVAILABLE:
+            # Real short training for better validation
+            results = train_physics_neural_operator(
+                challenge, strategy, epochs=quick_epochs
+            )
+        else:
+            # Simulated / lightweight prediction
+            stress = challenge.stress_data
+            u_true = stress["u_true"][0]
+            noise_level = strategy.get("noise_level", 0.012)
+            u_pred = u_true + noise_level * torch.randn_like(u_true)
 
-        # Simulate a reasonably good prediction
-        noise_level = strategy.get("noise_level", 0.012)
-        u_pred = u_true + noise_level * torch.randn_like(u_true)
-
-        # Prepare inputs for gates
-        results = {
-            "u_pred": u_pred,
-            "u_bc": torch.zeros_like(u_true),  # placeholder
-            "div_u": torch.zeros_like(u_true),
-            "u_norm": u_true,
-            "energy_trajectory": torch.linspace(1.0, 0.97, 60),
-            "uq_coverage": 0.91,
-            "dE_dt": torch.tensor([-0.0002]),
-        }
+            results = {
+                "u_pred": u_pred,
+                "u_bc": torch.zeros_like(u_true),
+                "div_u": torch.zeros_like(u_true),
+                "u_norm": u_true,
+                "energy_trajectory": torch.linspace(1.0, 0.97, 60),
+                "uq_coverage": 0.91,
+                "dE_dt": torch.tensor([-0.0002]),
+            }
 
         hard_pass, gate_details = evaluate_all_gates(results, pde_type="poisson")
 
-        # Compute simulated improvement vs baseline
-        submission_error = compute_relative_l2_error(u_pred, u_true)
+        submission_error = compute_relative_l2_error(results["u_pred"], challenge.stress_data["u_true"][0])
         baseline_error = challenge.baseline_error
         improvement = float(torch.log(torch.tensor(baseline_error)) - torch.log(torch.tensor(submission_error)))
 
