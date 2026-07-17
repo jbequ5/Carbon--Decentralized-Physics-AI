@@ -1,14 +1,15 @@
-"""Heat Challenge (Phase 0) - Transient diffusion.
-
-ρu/ρt = α ∇^{2}u
-
-Parabolic PDE. Good test for rollout stability and energy dissipation.
-"""
+"""Heat Challenge with benchmark support."""
 
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
 import numpy as np
 import torch
+
+try:
+    from hydrogen.data.pdebench_loader import PDEBenchLoader
+    PDEBENCH_AVAILABLE = True
+except ImportError:
+    PDEBENCH_AVAILABLE = False
 
 
 @dataclass
@@ -22,6 +23,7 @@ class Challenge:
     stress_data: Dict[str, torch.Tensor]
     symbolic_metadata: Dict[str, Any]
     baseline_error: float
+    data_source: str = "synthetic"
 
 
 def get_symbolic_metadata() -> Dict[str, Any]:
@@ -55,9 +57,7 @@ def generate_heat_data(
     t = torch.linspace(0, 1, nt)
     X, T = torch.meshgrid(x, t, indexing="ij")
 
-    # Initial Gaussian-like condition
     u0 = torch.exp(-((x - 0.5)**2) / 0.05)
-
     u = torch.zeros(nx, nt)
     u[:, 0] = u0
 
@@ -79,31 +79,40 @@ def generate_heat_data(
     }
 
 
-def load_challenge(challenge_id: str = "heat_v1") -> Challenge:
-    if challenge_id != "heat_v1":
-        raise ValueError(f"Unknown challenge: {challenge_id}")
+def load_challenge(challenge_id: str = "heat_v1", use_benchmark: bool = False) -> Challenge:
+    if use_benchmark and PDEBENCH_AVAILABLE:
+        try:
+            loader = PDEBenchLoader(pde_name="heat")
+            raw_data = loader.load(max_samples=80)
+            if "u_true" in raw_data:
+                u_true = raw_data["u_true"]
+                n = len(u_true)
+                s1, s2 = int(0.5 * n), int(0.75 * n)
+                return Challenge(
+                    challenge_id=challenge_id,
+                    problem="heat",
+                    dim=1,
+                    resolution=(u_true.shape[-2], u_true.shape[-1]),
+                    train_data={"u_true": u_true[:s1]},
+                    holdout_data={"u_true": u_true[s1:s2]},
+                    stress_data={"u_true": u_true[s2:]},
+                    symbolic_metadata=get_symbolic_metadata(),
+                    baseline_error=loader.get_baseline_error(),
+                    data_source="pdebench",
+                )
+        except Exception:
+            pass
 
-    resolution = (128, 64)
-    full_data = generate_heat_data(resolution=resolution, n_samples=6)
-
-    train_data = {k: v[:3] for k, v in full_data.items()}
-    holdout_data = {k: v[3:4] for k, v in full_data.items()}
-    stress_data = {k: v[4:6] for k, v in full_data.items()}
-
-    baseline_error = 0.09
-
+    full_data = generate_heat_data(n_samples=6)
     return Challenge(
         challenge_id=challenge_id,
         problem="heat",
         dim=1,
-        resolution=resolution,
-        train_data=train_data,
-        holdout_data=holdout_data,
-        stress_data=stress_data,
+        resolution=(128, 64),
+        train_data={k: v[:3] for k, v in full_data.items()},
+        holdout_data={k: v[3:4] for k, v in full_data.items()},
+        stress_data={k: v[4:6] for k, v in full_data.items()},
         symbolic_metadata=get_symbolic_metadata(),
-        baseline_error=baseline_error,
+        baseline_error=0.09,
+        data_source="synthetic",
     )
-
-
-def get_baseline_error(challenge_id: str = "heat_v1") -> float:
-    return load_challenge(challenge_id).baseline_error

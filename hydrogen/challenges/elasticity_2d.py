@@ -1,9 +1,4 @@
-"""Elasticity 2D Challenge (Phase 0) - Linear elasticity.
-
-Vector PDE for displacement field. Introduces multi-component fields.
-
-Simplified for MVP but follows same structure.
-"""
+"""Elasticity 2D - Currently synthetic only (no good public benchmark yet)."""
 
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
@@ -22,6 +17,7 @@ class Challenge:
     stress_data: Dict[str, torch.Tensor]
     symbolic_metadata: Dict[str, Any]
     baseline_error: float
+    data_source: str = "synthetic"
 
 
 def get_symbolic_metadata() -> Dict[str, Any]:
@@ -54,49 +50,32 @@ def generate_elasticity_data(
     y = torch.linspace(0, 1, ny)
     X, Y = torch.meshgrid(x, y, indexing="ij")
 
-    # Simple manufactured displacement field (ux, uy)
     ux = torch.sin(np.pi * X) * torch.cos(np.pi * Y) * 0.1
     uy = torch.cos(np.pi * X) * torch.sin(np.pi * Y) * 0.1
-
-    # Add noise
-    ux_noisy = ux + 0.01 * torch.randn_like(ux)
-    uy_noisy = uy + 0.01 * torch.randn_like(uy)
 
     return {
         "x": X.unsqueeze(0).repeat(n_samples, 1, 1),
         "y": Y.unsqueeze(0).repeat(n_samples, 1, 1),
         "ux_true": ux.unsqueeze(0).repeat(n_samples, 1, 1),
         "uy_true": uy.unsqueeze(0).repeat(n_samples, 1, 1),
-        "ux_noisy": ux_noisy.unsqueeze(0).repeat(n_samples, 1, 1),
-        "uy_noisy": uy_noisy.unsqueeze(0).repeat(n_samples, 1, 1),
     }
 
 
-def load_challenge(challenge_id: str = "elasticity_2d_v1") -> Challenge:
-    if challenge_id != "elasticity_2d_v1":
-        raise ValueError(f"Unknown challenge: {challenge_id}")
+def load_challenge(challenge_id: str = "elasticity_2d_v1", use_benchmark: bool = False) -> Challenge:
+    # No good public benchmark available yet for elasticity
+    if use_benchmark:
+        print("[Info] No strong PDEBench equivalent for Elasticity yet. Using synthetic.")
 
-    resolution = (64, 64)
-    full_data = generate_elasticity_data(resolution=resolution, n_samples=4)
-
-    train_data = {k: v[:2] for k, v in full_data.items()}
-    holdout_data = {k: v[2:3] for k, v in full_data.items()}
-    stress_data = {k: v[3:4] for k, v in full_data.items()}
-
-    baseline_error = 0.11
-
+    full_data = generate_elasticity_data(n_samples=4)
     return Challenge(
         challenge_id=challenge_id,
         problem="elasticity",
         dim=2,
-        resolution=resolution,
-        train_data=train_data,
-        holdout_data=holdout_data,
-        stress_data=stress_data,
+        resolution=(64, 64),
+        train_data={k: v[:2] for k, v in full_data.items()},
+        holdout_data={k: v[2:3] for k, v in full_data.items()},
+        stress_data={k: v[3:4] for k, v in full_data.items()},
         symbolic_metadata=get_symbolic_metadata(),
-        baseline_error=baseline_error,
+        baseline_error=0.11,
+        data_source="synthetic",
     )
-
-
-def get_baseline_error(challenge_id: str = "elasticity_2d_v1") -> float:
-    return load_challenge(challenge_id).baseline_error

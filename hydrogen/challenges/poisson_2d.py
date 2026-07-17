@@ -1,12 +1,6 @@
-"""Poisson 2D Challenge (Phase 0 MVP).
+"""Poisson 2D - Synthetic is sufficient and well-understood."""
 
-Simple manufactured solution on [0,1]x[0,1] grid.
-Provides train/holdout/stress splits + pre-computed symbolic metadata.
-
-Symbolic metadata generated from ModelingToolkit principles (symmetries, conservation, suggested weights).
-"""
-
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Dict, Any, Tuple
 import numpy as np
 import torch
@@ -22,22 +16,20 @@ class Challenge:
     holdout_data: Dict[str, torch.Tensor]
     stress_data: Dict[str, torch.Tensor]
     symbolic_metadata: Dict[str, Any]
-    baseline_error: float  # current best relative L2
+    baseline_error: float
+    data_source: str = "synthetic"
 
 
-def get_symbolic_metadata() -> Dict[str, Any]:
-    """Pre-computed symbolic features for Poisson (from MTK-style analysis)."""
+def get_symbolic_metadata_for_poisson() -> Dict[str, Any]:
     return {
-        "governing_pde": "∇²u = f",
-        "symmetries": ["translation", "rotation"],
-        "conservation_laws": [],  # elliptic, no time conservation
-        "dimensionless_groups": {},
-        "boundary_types": ["dirichlet", "neumann"],
+        "governing_pde": "∇^{2}u = f",
+        "symmetries": ["translation"],
+        "conservation_laws": [],
+        "boundary_types": ["dirichlet"],
         "suggested_loss_weights": {
             "pde_residual": 1.0,
             "boundary": 0.8,
         },
-        "validity_domain": {"source_term_magnitude": [0.1, 10.0]},
         "hard_constraints": ["elliptic"],
     }
 
@@ -45,13 +37,8 @@ def get_symbolic_metadata() -> Dict[str, Any]:
 def generate_poisson_data(
     resolution: Tuple[int, int] = (128, 128),
     seed: int = 42,
-    n_samples: int = 4,
+    n_samples: int = 8,
 ) -> Dict[str, torch.Tensor]:
-    """Generate simple Poisson data (manufactured solution).
-
-    u = sin(πx) * sin(πy) type field + random forcing for demo.
-    In real version: use PhysicsNeMo or FEniCS reference.
-    """
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -60,13 +47,8 @@ def generate_poisson_data(
     y = torch.linspace(0, 1, ny)
     X, Y = torch.meshgrid(x, y, indexing="ij")
 
-    # Simple manufactured solution: u = sin(πx)sin(πy)
     u_true = torch.sin(np.pi * X) * torch.sin(np.pi * Y)
-
-    # Forcing f = -∇²u (analytical for this u)
-    f = 2 * (np.pi ** 2) * u_true
-
-    # Add small noise for "measured" data variety
+    f = -2 * np.pi**2 * u_true
     u_noisy = u_true + 0.02 * torch.randn_like(u_true)
 
     return {
@@ -78,37 +60,20 @@ def generate_poisson_data(
     }
 
 
-def load_challenge(challenge_id: str = "poisson_2d_v1") -> Challenge:
-    """Main entry point. Returns full Challenge object."""
-    if challenge_id != "poisson_2d_v1":
-        raise ValueError(f"Unknown challenge: {challenge_id}. Only poisson_2d_v1 supported in MVP.")
+def load_challenge(challenge_id: str = "poisson_2d_v1", use_benchmark: bool = False) -> Challenge:
+    if use_benchmark:
+        print("[Info] Poisson uses high-quality synthetic data (no strong benchmark needed).")
 
-    resolution = (128, 128)
-
-    # Split data (demo sizes — real version uses proper PhysicsNeMo splits)
-    full_data = generate_poisson_data(resolution=resolution, n_samples=8)
-
-    # Simple split: first 4 train, next 2 holdout, last 2 stress
-    train_data = {k: v[:4] for k, v in full_data.items()}
-    holdout_data = {k: v[4:6] for k, v in full_data.items()}
-    stress_data = {k: v[6:8] for k, v in full_data.items()}
-
-    # Current baseline error (demo value — will be updated by Landscape)
-    baseline_error = 0.085  # ~8.5% relative L2 (placeholder)
-
+    full_data = generate_poisson_data(n_samples=8)
     return Challenge(
         challenge_id=challenge_id,
         problem="poisson",
         dim=2,
-        resolution=resolution,
-        train_data=train_data,
-        holdout_data=holdout_data,
-        stress_data=stress_data,
-        symbolic_metadata=get_symbolic_metadata(),
-        baseline_error=baseline_error,
+        resolution=(128, 128),
+        train_data={k: v[:4] for k, v in full_data.items()},
+        holdout_data={k: v[4:6] for k, v in full_data.items()},
+        stress_data={k: v[6:8] for k, v in full_data.items()},
+        symbolic_metadata=get_symbolic_metadata_for_poisson(),
+        baseline_error=0.08,
+        data_source="synthetic",
     )
-
-
-def get_baseline_error(challenge_id: str = "poisson_2d_v1") -> float:
-    """Quick helper for current best error."""
-    return load_challenge(challenge_id).baseline_error
