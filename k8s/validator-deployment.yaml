@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hydrogen-validator
+  labels:
+    app: hydrogen-validator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hydrogen-validator
+  template:
+    metadata:
+      labels:
+        app: hydrogen-validator
+    spec:
+      containers:
+        - name: validator
+          image: hydrogen/validator:latest
+          imagePullPolicy: IfNotPresent
+
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+            limits:
+              nvidia.com/gpu: 1
+
+          env:
+            - name: HYDROGEN_USE_BENCHMARK
+              value: "true"
+            - name: BT_NETUID
+              value: "107"
+            - name: BT_NETWORK
+              value: "finney"
+            # Add more env vars or secrets as needed
+
+          volumeMounts:
+            - name: pdebench-data
+              mountPath: /data/pdebench
+              readOnly: true
+            - name: hydrogen-code
+              mountPath: /workspace/hydrogen
+
+      volumes:
+        - name: pdebench-data
+          hostPath:
+            path: /mnt/data/pdebench   # Change to your actual data location
+            type: Directory
+        - name: hydrogen-code
+          hostPath:
+            path: /opt/hydrogen     # Mount your code if developing
+            type: Directory
+
+      nodeSelector:
+        accelerator: nvidia-tesla   # Adjust based on your cluster nodes
