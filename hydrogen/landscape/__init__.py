@@ -1,9 +1,17 @@
-"""Landscape Agent module (initial skeleton).
+"""Hydrogen Landscape Module
 
-Will eventually handle collection, storage, and distribution of
-symbolic priors, evolved loss weights, and learned scoring expressions.
+The Landscape is the causal + symbolic intelligence layer of the subnet.
+It collects knowledge from miners and validators, runs Double ML + PySR,
+and provides improved priors to the network.
 """
 
+from .agent import LandscapeAgent
+from .causal_knowledge_base import CausalKnowledgeBase
 from .storage import save_symbolic_artifact, load_symbolic_artifacts
 
-__all__ = ["save_symbolic_artifact", "load_symbolic_artifacts"]
+__all__ = [
+    "LandscapeAgent",
+    "CausalKnowledgeBase",
+    "save_symbolic_artifact",
+    "load_symbolic_artifacts",
+]
