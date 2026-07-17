@@ -1,8 +1,7 @@
-"""Hydrogen Validator with integrated emission mechanics (75/25 model).
+"""Hydrogen Validator with Emission Mechanics Integration.
 
-- Tracks leaders per challenge
-- Detects breakthroughs
-- Prepares for decaying Top-2 stipend + breakthrough bounties
+Now tracks per-challenge leaderboards and detects breakthroughs
+using the new 75/25 emission system.
 """
 
 import time
@@ -36,12 +35,7 @@ class Validator(BaseValidatorNeuron):
             "ns_2d_laminar_v1",
         ]
         self.use_benchmark = True
-
-        # Emission config
-        self.base_stress_weight = 0.35
-        self.max_stress_weight = 0.65
-
-        bt.logging.info("Hydrogen Validator with emission tracking enabled (75/25 model).")
+        bt.logging.info("Hydrogen Validator with emission mechanics (75/25) integrated.")
 
     async def forward(self):
         bt.logging.info("Starting validation round...")
@@ -74,6 +68,19 @@ class Validator(BaseValidatorNeuron):
                 improvement = validation.get("improvement", 0.0)
                 round_scores[hotkey] = score
                 improvements.append((hotkey, improvement))
+
+                # === Emission Integration ===
+                stress_result = validation.get("stress_result", {})
+                final_stress_score = stress_result.get("final_stress_score", score)
+
+                was_breakthrough, msg = update_leaderboard(
+                    challenge_id=challenge_id,
+                    hotkey=hotkey,
+                    new_score=final_stress_score,
+                )
+
+                if was_breakthrough:
+                    bt.logging.warning(f"🚀 BREAKTHROUGH on {challenge_id}! {msg}")
 
                 bt.logging.info(f"{hotkey[:8]} on {challenge_id}: score={score:.4f}")
 
@@ -145,7 +152,6 @@ class Validator(BaseValidatorNeuron):
         else:
             pde_type = "poisson"
 
-        # Public holdout
         u_key = next(
             (k for k in ["u_true", "velocity_true", "ux_true", "u"] if k in challenge.stress_data),
             list(challenge.stress_data.keys())[0]
@@ -158,7 +164,6 @@ class Validator(BaseValidatorNeuron):
         public_error = compute_relative_l2_error(u_pred, u_true)
         public_improvement = float(torch.log(torch.tensor(baseline_error)) - torch.log(torch.tensor(public_error)))
 
-        # Hidden stress test
         stress_result = run_stress_test(
             challenge_id=challenge_id,
             results=results,
@@ -178,20 +183,12 @@ class Validator(BaseValidatorNeuron):
 
         stress_score = stress_result.get("final_stress_score", 0.5)
 
-        # === Adaptive weighting ===
-        stress_weight = self.base_stress_weight + min(0.25, public_improvement * 0.8)
-        stress_weight = min(self.max_stress_weight, max(self.base_stress_weight, stress_weight))
+        # Adaptive weighting (public vs stress)
+        stress_weight = 0.35 + min(0.25, public_improvement * 0.8)
+        stress_weight = min(0.65, max(0.35, stress_weight))
         public_weight = 1.0 - stress_weight
 
         final_score = (public_improvement * public_weight) + (stress_score * stress_weight)
-
-        # === Emission Tracking ===
-        hotkey = None  # Will be set by caller in real flow
-        # For now we log — full hotkey tracking happens in forward()
-        was_breakthrough, msg = update_leaderboard(challenge_id, "unknown", stress_score)
-
-        if was_breakthrough:
-            bt.logging.warning(f"🚀 BREAKTHROUGH on {challenge_id}: {msg}")
 
         return {
             "score": max(0.0, final_score),
@@ -199,8 +196,6 @@ class Validator(BaseValidatorNeuron):
             "hard_pass": True,
             "stress_result": stress_result,
             "data_source": getattr(challenge, "data_source", "unknown"),
-            "public_weight": public_weight,
-            "stress_weight": stress_weight,
         }
 
 
