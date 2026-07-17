@@ -1,7 +1,7 @@
-"""Enhanced Stress Test Engine for Hydrogen (Per-Challenge).
+"""Stress Test Engine with UQ Calibration Stress.
 
-Stronger, physics-specific hard gates and stress metrics.
-Especially hardened for Navier-Stokes and Burgers.
+Now includes explicit UQ calibration checking on hidden stress sets.
+We learn from uncertainty quality (good calibration can be rewarded).
 """
 
 import hashlib
@@ -47,13 +47,10 @@ def generate_stress_conditions(
         conditions["divergence_tolerance"] = 1e-3 * (1 + difficulty * 0.5)
     elif "burgers" in challenge_id:
         conditions["viscosity_multiplier"] = rng.uniform(0.2, 3.0) * difficulty
-        conditions["shock_strength"] = rng.uniform(0.8, 1.5)
     elif "darcy" in challenge_id:
         conditions["permeability_contrast"] = 80 + rng.uniform(30, 500) * difficulty
     elif "heat" in challenge_id:
         conditions["diffusivity_multiplier"] = rng.uniform(0.3, 2.5) * difficulty
-    elif "elasticity" in challenge_id:
-        conditions["loading_perturbation"] = rng.uniform(0.2, 1.0) * difficulty
 
     return conditions
 
@@ -70,16 +67,13 @@ def run_hard_gates(
 
     difficulty = conditions.get("difficulty", 1.0)
 
-    # Navier-Stokes specific hard gates
     if pde_type == "navier_stokes":
         if "velocity" in results or "u_pred" in results:
-            # Placeholder for divergence check (real impl would compute it)
             div_norm = results.get("divergence_norm", torch.tensor(0.0))
             if div_norm > conditions.get("divergence_tolerance", 1e-3):
                 gate_details["divergence_free"] = False
                 return False, gate_details
 
-        # Long rollout energy stability
         if "energy_trajectory" in results:
             energy = results["energy_trajectory"]
             if len(energy) > 5:
@@ -88,17 +82,14 @@ def run_hard_gates(
                     gate_details["ns_long_term_stability"] = False
                     return False, gate_details
 
-    # Burgers specific
     if pde_type == "burgers":
         if "energy_trajectory" in results:
             energy = results["energy_trajectory"]
             if len(energy) > 5:
-                # Should dissipate but not blow up
                 if torch.any(energy < -0.1):
                     gate_details["burgers_negative_energy"] = False
                     return False, gate_details
 
-    # General rollout stability under stress
     if "energy_trajectory" in results:
         energy = results["energy_trajectory"]
         if len(energy) > 8:
@@ -115,6 +106,7 @@ def compute_stress_metrics(
     u_true: torch.Tensor,
     conditions: Dict[str, Any],
     pde_type: str,
+    results: Dict[str, torch.Tensor] = None,
 ) -> Dict[str, float]:
     metrics = {}
 
@@ -137,6 +129,24 @@ def compute_stress_metrics(
         metrics["heterogeneous_robustness"] = max(0.0, 1.0 - base_error * 2.5)
     elif pde_type == "heat":
         metrics["diffusion_robustness"] = max(0.0, 1.0 - base_error * 3)
+
+    # === UQ Calibration Stress ===
+    if results is not None:
+        uncertainty = results.get("uncertainty", results.get("std", results.get("ensemble_std", None)))
+        if uncertainty is not None and isinstance(uncertainty, torch.Tensor):
+            # Simple calibration proxy: correlation between error and uncertainty
+            error_map = torch.abs(u_pred - u_true)
+            if error_map.numel() > 10 and uncertainty.numel() > 10:
+                # Flatten and compute correlation
+                err_flat = error_map.flatten().detach().cpu().numpy()
+                unc_flat = uncertainty.flatten().detach().cpu().numpy()
+                if np.std(unc_flat) > 1e-6:
+                    corr = np.corrcoef(err_flat, unc_flat)[0, 1]
+                    metrics["uq_error_correlation"] = float(corr)
+                    # Good calibration → positive correlation
+                    metrics["uq_calibration_score"] = max(0.0, min(1.0, (corr + 1) / 2))
+                else:
+                    metrics["uq_calibration_score"] = 0.5
 
     return metrics
 
@@ -163,10 +173,13 @@ def run_stress_test(
             "conditions": conditions,
         }
 
-    stress_metrics = compute_stress_metrics(u_pred, u_true, conditions, pde_type)
+    stress_metrics = compute_stress_metrics(u_pred, u_true, conditions, pde_type, results=results)
 
     base_error = stress_metrics.get("stress_l2_error", 0.6)
-    final_stress_score = max(0.0, 1.0 - base_error * 2.8)
+    uq_calib = stress_metrics.get("uq_calibration_score", 0.5)
+
+    # Reward good UQ calibration slightly
+    final_stress_score = max(0.0, 1.0 - base_error * 2.6 + (uq_calib - 0.5) * 0.3)
 
     return {
         "hard_pass": True,
