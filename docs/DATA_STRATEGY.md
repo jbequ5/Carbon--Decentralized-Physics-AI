@@ -1,41 +1,36 @@
 # Data Strategy for Hydrogen
 
 ## Goal
-Score miners against the highest quality reference solutions possible.
-This ensures emissions reward *actually useful* improvements in physics-informed neural operators.
+Score miners against the highest quality reference solutions possible so that emissions reward *actually useful* scientific work.
 
-## Recommended Sources (Priority Order)
+## Recommended Sources
 
-### 1. PDEBench (Primary Recommendation)
-- Best public benchmark for PINO/FNO-style work.
-- High-quality numerical data for:
-  - Darcy (excellent match)
-  - Navier-Stokes 2D incompressible (`ns_incom`)
-  - Burgers
-  - Various diffusion problems
-- Use this wherever available.
+### 1. PDEBench (Primary)
+Best public benchmark for PINO/FNO work.
 
-### 2. The Well (Secondary)
-- Very large and diverse (15TB).
-- Good for long-term breadth.
+**Priority downloads:**
+- `darcy` (small, high quality)
+- `ns_incom` (2D incompressible Navier-Stokes — highest value)
+- `burgers`
 
-### 3. Synthetic / Custom Generation
-- Use when no good benchmark exists (e.g. Elasticity, pure Poisson).
-- Improve quality over time (higher-order solvers, better IC/BC).
+### How to Download
 
-## Implementation Plan
+```bash
+# From Hydrogen root
+python -m hydrogen.data.download_pdebench --pde_name darcy
+python -m hydrogen.data.download_pdebench --pde_name ns_incom
+```
 
-1. Create unified data loading layer (`hydrogen/data/`)
-2. Prioritize PDEBench integration for Darcy + Navier-Stokes
-3. Make `load_challenge(use_benchmark=True)` the default path when data is available
-4. Keep synthetic generators as fallback
+Then place the downloaded `.h5` files inside `./data/pdebench/` (or the path configured in `PDEBenchLoader`).
+
+The loader will automatically discover them.
 
 ## Current Status
-- Infrastructure created
-- PDEBench loader scaffold in place
-- Darcy and NS challenges can be switched to benchmark mode
+- PDEBenchLoader fully implemented with HDF5 parsing
+- All major challenges support benchmark mode
+- Validator scores against real benchmark data by default
 
-## Next Actions
-- Implement full HDF5 parsing for key PDEBench datasets
-- Add download automation
-- Wire benchmark data into validator training loop
+## Caching & Usability
+- `PDEBenchLoader` has `ensure_data()` helper
+- Download script gives clear instructions
+- Falls back gracefully to synthetic data
