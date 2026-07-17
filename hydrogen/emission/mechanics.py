@@ -1,6 +1,6 @@
 """Core emission mechanics for Hydrogen (75/25 model).
 
-Includes cooldowns and bounty accumulation for breakthroughs.
+Configurable Top-2 split and Yuma-friendly weight generation.
 """
 
 from typing import Dict, Any, Tuple
@@ -9,7 +9,7 @@ import numpy as np
 
 
 # ============================================================
-# Configuration
+# Configuration (can be overridden)
 # ============================================================
 
 BREAKTHROUGH_BOUNTY_SHARE = 0.75
@@ -17,9 +17,11 @@ TOP2_STIPEND_SHARE = 0.25
 
 BREAKTHROUGH_THRESHOLD = 0.06
 STIPEND_DECAY_RATE = 0.45
-
-# Cooldown: number of epochs after a breakthrough before another can be claimed on same challenge
 BREAKTHROUGH_COOLDOWN_EPOCHS = 8
+
+# Default Top-2 split (can be changed)
+DEFAULT_LEADER_SHARE = 0.72
+DEFAULT_SECOND_SHARE = 0.28
 
 
 # ============================================================
@@ -35,7 +37,7 @@ class ChallengeState:
         self.second_stipend_share = 0.0
         self.epochs_without_improvement = 0
         self.epochs_since_last_breakthrough = 0
-        self.accumulated_bounty_pool = 0.0   # Bounty pool that grows if no breakthrough
+        self.accumulated_bounty_pool = 0.0
 
 
 CHALLENGE_STATES: Dict[str, ChallengeState] = {}
@@ -71,7 +73,6 @@ def update_leaderboard(
     state.epochs_since_last_breakthrough += 1
 
     if is_breakthrough(new_score, state.current_best_score):
-        # Check cooldown
         if state.epochs_since_last_breakthrough >= BREAKTHROUGH_COOLDOWN_EPOCHS:
             was_breakthrough = True
             state.current_best_score = new_score
@@ -94,7 +95,12 @@ def update_leaderboard(
 def calculate_top2_stipend(
     challenge_id: str,
     total_stipend_pool: float,
+    leader_ratio: float = DEFAULT_LEADER_SHARE,
+    second_ratio: float = DEFAULT_SECOND_SHARE,
 ) -> Dict[str, float]:
+    """
+    Calculate decaying Top-2 stipend with configurable split.
+    """
     state = get_or_create_state(challenge_id)
 
     if state.leader_hotkey is None:
@@ -102,8 +108,8 @@ def calculate_top2_stipend(
 
     decay_factor = (1 - STIPEND_DECAY_RATE) ** state.epochs_without_improvement
 
-    leader_share = 0.72 * decay_factor
-    second_share = 0.28 * decay_factor
+    leader_share = leader_ratio * decay_factor
+    second_share = second_ratio * decay_factor
 
     total = leader_share + second_share
     if total > 0:
@@ -119,24 +125,36 @@ def calculate_top2_stipend(
     return result
 
 
+def get_yuma_weights(
+    challenge_id: str,
+    total_stipend_pool: float = 1.0,
+    leader_ratio: float = DEFAULT_LEADER_SHARE,
+    second_ratio: float = DEFAULT_SECOND_SHARE,
+) -> Dict[str, float]:
+    """
+    Returns weights ready for Yuma Consensus / set_weights.
+    Normalized so they sum to total_stipend_pool.
+    """
+    return calculate_top2_stipend(
+        challenge_id=challenge_id,
+        total_stipend_pool=total_stipend_pool,
+        leader_ratio=leader_ratio,
+        second_ratio=second_ratio,
+    )
+
+
 def calculate_breakthrough_bounty(
     challenge_id: str,
     total_bounty_pool: float,
     was_breakthrough: bool,
 ) -> float:
-    """
-    Returns the bounty amount to pay out.
-    - If breakthrough happened: pay accumulated pool + current epoch's share
-    - Otherwise: accumulate current epoch's share into the pool
-    """
     state = get_or_create_state(challenge_id)
 
-    # Add this epoch's portion to the accumulated pool
     state.accumulated_bounty_pool += total_bounty_pool
 
     if was_breakthrough:
         payout = state.accumulated_bounty_pool
-        state.accumulated_bounty_pool = 0.0  # Reset after payout
+        state.accumulated_bounty_pool = 0.0
         return payout
     else:
-        return 0.0  # No payout this epoch
+        return 0.0
