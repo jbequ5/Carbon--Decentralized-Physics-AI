@@ -1,13 +1,19 @@
-"""Hydrogen Validator - Robust version with better error handling and sampling."""
+"""Validator with PySR-based scoring evolution (regressing on gate outputs + improvement)."""
 
 import time
-import random
 import numpy as np
+import torch
 import bittensor as bt
 
 from hydrogen.base.validator import BaseValidatorNeuron
 from hydrogen.protocol import StrategySynapse
 from hydrogen.challenges import load_challenge
+
+try:
+    from pysr import PySRRegressor
+    PYSR_AVAILABLE = True
+except ImportError:
+    PYSR_AVAILABLE = False
 
 
 class Validator(BaseValidatorNeuron):
@@ -25,8 +31,9 @@ class Validator(BaseValidatorNeuron):
             "ns_2d_laminar_v1",
         ]
         self.use_benchmark = True
-        self.sample_size = 20  # Number of miners to query per round
-        bt.logging.info("Hydrogen Validator initialized (robust mode).")
+        self.use_pysr_scoring = PYSR_AVAILABLE
+        self.pysr_scoring_model = None
+        bt.logging.info("Hydrogen Validator with PySR gate regression enabled.")
 
     async def forward(self):
         bt.logging.info("Starting validation round...")
@@ -34,58 +41,33 @@ class Validator(BaseValidatorNeuron):
         challenge_id = self.challenge_ids[self.current_challenge_index]
         self.current_challenge_index = (self.current_challenge_index + 1) % len(self.challenge_ids)
 
-        # Robust miner sampling
-        all_axons = [a for a in self.metagraph.axons if a.hotkey != self.wallet.hotkey.ss58_address]
-        if not all_axons:
-            bt.logging.warning("No miners available.")
+        axons = [a for a in self.metagraph.axons if a.hotkey != self.wallet.hotkey.ss58_address]
+        if not axons:
             return
-
-        sample_size = min(self.sample_size, len(all_axons))
-        axons = random.sample(all_axons, sample_size)
-
-        bt.logging.info(f"Querying {len(axons)} miners for challenge {challenge_id}...")
 
         synapse = StrategySynapse(challenge_id=challenge_id)
-
-        try:
-            responses = await self.dendrite(
-                axons=axons,
-                synapse=synapse,
-                timeout=25,  # Slightly reduced timeout for robustness
-            )
-        except Exception as e:
-            bt.logging.error(f"Dendrite query failed: {e}")
-            return
+        responses = await self.dendrite(axons=axons, synapse=synapse, timeout=30)
 
         round_scores = {}
         improvements = []
 
         for response in responses:
-            try:
-                if response is None:
-                    continue
-                if not getattr(response, "accepted", False):
-                    continue
-
-                strategy = getattr(response, "strategy", None)
-                if strategy is None:
-                    continue
-
-                validation = self.validate_submission(challenge_id, strategy)
-                hotkey = response.dendrite.hotkey if response.dendrite else None
-
-                if hotkey and validation.get("hard_pass"):
-                    score = validation["score"]
-                    improvement = validation.get("improvement", 0.0)
-                    round_scores[hotkey] = score
-                    improvements.append((hotkey, improvement))
-
-                    data_src = validation.get("data_source", "unknown")
-                    bt.logging.info(f"{hotkey[:8]} on {challenge_id} ({data_src}): score={score:.4f}")
-
-            except Exception as e:
-                bt.logging.warning(f"Error processing response: {e}")
+            if not response or not getattr(response, "accepted", False):
                 continue
+            strategy = getattr(response, "strategy", None)
+            if not strategy:
+                continue
+
+            validation = self.validate_submission(challenge_id, strategy)
+            hotkey = response.dendrite.hotkey if response.dendrite else None
+
+            if hotkey and validation.get("hard_pass"):
+                score = validation["score"]
+                improvement = validation.get("improvement", 0.0)
+                round_scores[hotkey] = score
+                improvements.append((hotkey, improvement))
+
+                bt.logging.info(f"{hotkey[:8]} on {challenge_id}: score={score:.4f}")
 
         self._update_scores(round_scores, improvements)
 
@@ -128,7 +110,7 @@ class Validator(BaseValidatorNeuron):
                 uids=hotkeys,
                 weights=weights,
             )
-            bt.logging.info(f"Weights set successfully.")
+            bt.logging.info("Weights set.")
 
         except Exception as e:
             bt.logging.error(f"Weight setting failed: {e}")
@@ -137,21 +119,11 @@ class Validator(BaseValidatorNeuron):
         from hydrogen.physics.gates import evaluate_all_gates, compute_relative_l2_error
         from hydrogen.training.physicsnemo_trainer import train_physics_neural_operator
 
-        try:
-            challenge = load_challenge(challenge_id, use_benchmark=self.use_benchmark)
-        except Exception as e:
-            bt.logging.error(f"Failed to load challenge {challenge_id}: {e}")
-            return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
-
+        challenge = load_challenge(challenge_id, use_benchmark=self.use_benchmark)
         baseline_error = challenge.baseline_error
 
-        try:
-            results = train_physics_neural_operator(challenge, strategy, epochs=6)
-        except Exception as e:
-            bt.logging.warning(f"Training failed for {challenge_id}: {e}")
-            return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
+        results = train_physics_neural_operator(challenge, strategy, epochs=6)
 
-        # pde_type routing
         if "ns_2d" in challenge_id or "navier" in challenge_id:
             pde_type = "navier_stokes"
         elif "burgers" in challenge_id:
@@ -165,39 +137,56 @@ class Validator(BaseValidatorNeuron):
         else:
             pde_type = "poisson"
 
-        try:
-            hard_pass, gate_details = evaluate_all_gates(results, pde_type=pde_type)
-        except Exception as e:
-            bt.logging.warning(f"Gate evaluation failed: {e}")
-            return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
+        hard_pass, gate_details = evaluate_all_gates(results, pde_type=pde_type)
 
         if not hard_pass:
             return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
 
-        # Flexible field access
-        try:
-            u_key = next(
-                (k for k in ["u_true", "velocity_true", "ux_true", "u"] if k in challenge.stress_data),
-                list(challenge.stress_data.keys())[0]
-            )
-            u_true = challenge.stress_data[u_key][0]
-            u_pred = results.get("u_pred", results.get("velocity_pred", torch.zeros_like(u_true)))
+        u_key = next((k for k in ["u_true", "velocity_true", "ux_true", "u"] if k in challenge.stress_data), list(challenge.stress_data.keys())[0])
+        u_true = challenge.stress_data[u_key][0]
+        if u_true.dim() == 3:
+            u_true = u_true[0]
+        u_pred = results.get("u_pred", results.get("velocity_pred", torch.zeros_like(u_true)))
 
-            if u_true.dim() == 3:
-                u_true = u_true[0]
+        submission_error = compute_relative_l2_error(u_pred, u_true)
+        improvement = float(torch.log(torch.tensor(baseline_error)) - torch.log(torch.tensor(submission_error)))
 
-            submission_error = compute_relative_l2_error(u_pred, u_true)
-            improvement = float(torch.log(torch.tensor(baseline_error)) - torch.log(torch.tensor(submission_error)))
+        # PySR: Try to learn better scoring from gate outputs + improvement
+        final_score = max(0.0, improvement)
+        if self.use_pysr_scoring and PYSR_AVAILABLE and gate_details:
+            try:
+                # Collect gate values + improvement as features
+                gate_values = []
+                for gate_name, value in gate_details.items():
+                    if isinstance(value, (int, float, bool)):
+                        gate_values.append(float(value))
 
-            return {
-                "score": max(0.0, improvement),
-                "improvement": improvement,
-                "hard_pass": True,
-                "data_source": getattr(challenge, "data_source", "unknown"),
-            }
-        except Exception as e:
-            bt.logging.warning(f"Error computing improvement: {e}")
-            return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
+                if len(gate_values) >= 2:
+                    X = np.array([gate_values])
+                    y = np.array([improvement])
+
+                    model = PySRRegressor(
+                        niterations=10,
+                        binary_operators=["+", "*"],
+                        unary_operators=["exp"],
+                        verbosity=0,
+                        random_state=42,
+                    )
+                    model.fit(X, y)
+
+                    # Use the model to predict a refined score
+                    predicted = model.predict(X)[0]
+                    final_score = max(0.0, float(predicted))
+                    bt.logging.info(f"PySR discovered scoring expression for {challenge_id}")
+            except Exception as e:
+                bt.logging.debug(f"PySR scoring failed: {e}")
+
+        return {
+            "score": final_score,
+            "improvement": improvement,
+            "hard_pass": True,
+            "data_source": getattr(challenge, "data_source", "unknown"),
+        }
 
 
 if __name__ == "__main__":
