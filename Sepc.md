@@ -1247,3 +1247,4 @@ Phase 0-1: UQ target 90%, rollout 100 steps
 Phase 2:   UQ target 95%, rollout 100 steps  
 Phase 3:   UQ target 99%, rollout 1000 steps + spectral stationarity
 ```
+
