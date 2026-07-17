@@ -1,4 +1,4 @@
-"""Strategy generation supporting all current challenges."""
+"""Strategy generation supporting all challenges including Navier-Stokes."""
 
 from typing import Dict, Any, Tuple
 import torch
@@ -60,10 +60,11 @@ def get_local_validation_score(
         if use_real_training and PHYSICSNEMO_AVAILABLE:
             results = train_physics_neural_operator(challenge, strategy, epochs=quick_epochs)
         else:
-            # Generic fallback
             stress = challenge.stress_data
             first_key = list(stress.keys())[0]
             u_true = stress[first_key][0]
+            if u_true.dim() == 3:  # vector field (e.g. NS velocity)
+                u_true = u_true[0]
             noise_level = strategy.get("noise_level", 0.012)
             u_pred = u_true + noise_level * torch.randn_like(u_true)
 
@@ -77,7 +78,9 @@ def get_local_validation_score(
                 "dE_dt": torch.tensor([-0.0002]),
             }
 
-        if "burgers" in challenge_id:
+        if "ns_2d" in challenge_id or "navier" in challenge_id:
+            pde_type = "navier_stokes"
+        elif "burgers" in challenge_id:
             pde_type = "burgers"
         elif "darcy" in challenge_id:
             pde_type = "darcy"
@@ -90,9 +93,11 @@ def get_local_validation_score(
 
         hard_pass, gate_details = evaluate_all_gates(results, pde_type=pde_type)
 
-        # Robust error calculation
-        u_key = next((k for k in ["u_true", "ux_true", "u"] if k in challenge.stress_data), list(challenge.stress_data.keys())[0])
-        submission_error = compute_relative_l2_error(results.get("u_pred", results.get("ux_pred", torch.zeros_like(challenge.stress_data[u_key][0]))), challenge.stress_data[u_key][0])
+        u_key = list(challenge.stress_data.keys())[0]
+        u_true = challenge.stress_data[u_key][0]
+        if u_true.dim() == 3:
+            u_true = u_true[0]
+        submission_error = compute_relative_l2_error(results.get("u_pred", torch.zeros_like(u_true)), u_true)
         baseline_error = challenge.baseline_error
         improvement = float(torch.log(torch.tensor(baseline_error)) - torch.log(torch.tensor(submission_error)))
 

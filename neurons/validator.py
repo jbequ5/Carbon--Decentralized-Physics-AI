@@ -1,4 +1,4 @@
-"""Hydrogen Validator supporting broad challenge set."""
+"""Hydrogen Validator with full multi-challenge support including Navier-Stokes."""
 
 import time
 import numpy as np
@@ -21,8 +21,9 @@ class Validator(BaseValidatorNeuron):
             "burgers_v1",
             "heat_v1",
             "elasticity_2d_v1",
+            "ns_2d_laminar_v1",
         ]
-        bt.logging.info("Hydrogen Validator with broad challenge coverage (5 PDEs).")
+        bt.logging.info("Hydrogen Validator with broad coverage including Navier-Stokes 2D laminar.")
 
     async def forward(self):
         bt.logging.info("Starting validation round...")
@@ -113,7 +114,9 @@ class Validator(BaseValidatorNeuron):
 
         results = train_physics_neural_operator(challenge, strategy, epochs=6)
 
-        if "burgers" in challenge_id:
+        if "ns_2d" in challenge_id or "navier" in challenge_id:
+            pde_type = "navier_stokes"
+        elif "burgers" in challenge_id:
             pde_type = "burgers"
         elif "darcy" in challenge_id:
             pde_type = "darcy"
@@ -129,10 +132,12 @@ class Validator(BaseValidatorNeuron):
         if not hard_pass:
             return {"score": 0.0, "improvement": 0.0, "hard_pass": False}
 
-        # Flexible field access
-        u_key = next((k for k in ["u_true", "ux_true", "u"] if k in challenge.stress_data), list(challenge.stress_data.keys())[0])
-        u_pred = results.get("u_pred", results.get("ux_pred", torch.zeros_like(challenge.stress_data[u_key][0])))
-        submission_error = compute_relative_l2_error(u_pred, challenge.stress_data[u_key][0])
+        u_key = list(challenge.stress_data.keys())[0]
+        u_true = challenge.stress_data[u_key][0]
+        if u_true.dim() == 3:  # vector field
+            u_true = u_true[0]
+        u_pred = results.get("u_pred", torch.zeros_like(u_true))
+        submission_error = compute_relative_l2_error(u_pred, u_true)
         improvement = float(torch.log(torch.tensor(baseline_error)) - torch.log(torch.tensor(submission_error)))
 
         return {
