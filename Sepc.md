@@ -1247,4 +1247,176 @@ Phase 0-1: UQ target 90%, rollout 100 steps
 Phase 2:   UQ target 95%, rollout 100 steps  
 Phase 3:   UQ target 99%, rollout 1000 steps + spectral stationarity
 ```
+### 1.3 Core Scientific Dependencies (SciML Integration)
+
+Hydrogen deliberately builds on the SciML ecosystem for symbolic reasoning, hybrid methods, and operator learning.
+
+**Primary SciML Packages**
+
+| Package | Role in Hydrogen | Phase |
+|---------|------------------|-------|
+| **ModelingToolkit.jl** | Symbolic PDE representation, conservation laws, symmetries, acausal composition, Symbolic Gauntlet | Phase 0+ |
+| **NeuralOperators.jl** | Official SciML implementations of FNO, DeepONet, Physics-Informed Neural Operators (Julia / Lux) | Phase 0–1 (reference + optional backend) |
+| **NeuralPDE.jl** | Physics-Informed Neural Network solvers that accept ModelingToolkit `PDESystem` | Phase 1+ |
+| **DataDrivenDiffEq.jl** | Automated equation discovery (SInDy-style methods) | Phase 1–2 (Symbolic Regression track) |
+| **ModelingToolkitNeuralNets.jl** | Symbolic-numeric neural DAEs and universal differential equations | Phase 2+ |
+| **SciMLSensitivity.jl** | High-quality adjoints and sensitivity analysis for physics-informed training | Phase 0+ (recommended) |
+| **DiffEqFlux.jl** | Hybrid neural + differential equation models | Phase 1–2 |
+| **Surrogates.jl** | Surrogate modeling and optimization toolkit | Phase 1+ |
+| **OrdinaryDiffEq.jl** + **DiffEqGPU.jl** | High-performance reference solvers and GPU acceleration | All phases |
+
+These packages form the preferred foundation for the Symbolic Layer and for any Julia-based validator images.
+
+---
+
+### 3.1 Backbone Images (Updated)
+
+Add the following rows to the existing table:
+
+| Image | Backbones | Framework | Notes |
+|-------|-----------|-----------|-------|
+| `hydrogen/validator:sciml-fno-v24.09` | FNO | Julia (NeuralOperators.jl + Lux) | SciML reference implementation |
+| `hydrogen/validator:sciml-pino-v24.09` | PINO | Julia (NeuralOperators.jl + Lux) | SciML reference implementation |
+| `hydrogen/validator:sciml-deeponet-v24.09` | DeepONet | Julia (NeuralOperators.jl + Lux) | SciML reference implementation |
+
+**Framework Selection**
+Miners specify `"backend": "pytorch" | "jax" | "sciml"` in the Strategy JSON.
+- `"sciml"` pulls the corresponding NeuralOperators.jl-based image.
+- Cross-framework validation is performed via ONNX export/import where possible.
+
+---
+
+### 4.6 Symbolic Metadata Generation (Replaced)
+
+```python
+def generate_symbolic_metadata(problem_id: int, rng) -> SymbolicMetadata:
+"""
+Generates symbolic metadata for a challenge using ModelingToolkit.jl.
+Runs once per challenge type and is cached forever.
+"""
+# 1. Parse the PDE into a ModelingToolkit system
+sys = parse_pde_to_mtk(problem_id)
+
+# 2. Extract structural information via ModelingToolkit
+symmetries = detect_symmetries(sys)
+conservation_laws = detect_conservation_laws(sys)
+dimensionless = extract_dimensionless_groups(sys)
+boundary_types = extract_boundary_conditions(sys)
+coupling_terms = extract_coupling_terms(sys)
+
+# 3. Optional: DataDrivenDiffEq-style discovery on sample trajectories
+# (used to enrich the Symbolic Regression track)
+
+return SymbolicMetadata(
+governing_pde=sys,
+symmetries=symmetries,
+conservation_laws=conservation_laws,
+dimensionless_groups=dimensionless,
+boundary_types=boundary_types,
+coupling_terms=coupling_terms
+)
+```
+
+---
+
+### 5. Six Competition Tracks (Symbolic Tracks Updated)
+
+| Track | Submission Format | What It Proves |
+|-------|-------------------|----------------|
+| **Monolith** | Single strategy JSON | Can a monolithic model beat composition? |
+| **Composition** | Specialist pipeline with adapters | Does composition beat monolith? |
+| **Specialist-Only** | Single specialist ID (no adapter) | How much does the adapter matter? |
+| **Symbolic Regression** | Discovered PDE string + basis (via DataDrivenDiffEq.jl) | Can the agent discover the governing PDE from data? |
+| **Symbolic Composition** | ModelingToolkit component graph + adapters | Can symbolic components compose to beat monolith? |
+| **Symbolic Distillation** | ONNX + ModelingToolkit symbolic metadata + CUDA kernel | Can the specialist be compressed while preserving symbolic structure? |
+
+---
+
+### 7.3 Weekly Specialist Distillation – Symbolic Gauntlet (Updated)
+
+```python
+# SYMBOLIC GAUNTLET (powered by ModelingToolkit)
+if pass_symbolic_gauntlet(student, problem_id):
+# Verify that symbolic metadata extracted via ModelingToolkit
+# is preserved after distillation and matches the teacher ensemble
+symbolic_meta = extract_symbolic_metadata_mtk(student, teachers)
+
+specialist = Specialist(
+specialist_id=f"{problem_id}_v{version}",
+onnx_model=export_onnx(student),
+problem_signature=get_signature(problem_id),
+metrics=evaluate_full(student, problem_id),
+validity_domain=estimate_validity_domain(student),
+symbolic_metadata=symbolic_meta,
+cuda_kernel=generate_cuda_kernel(student),
+license="AGPL-3.0 + Commercial Dual-License"
+)
+specialist_bank.publish(specialist)
+```
+
+---
+
+### 14.8.6 Preferred SciML Stack for the Symbolic Layer
+
+- **ModelingToolkit.jl** — Primary symbolic engine
+- **DataDrivenDiffEq.jl** — Equation discovery backend for the Symbolic Regression track
+- **ModelingToolkitNeuralNets.jl** — Hybrid symbolic-numeric neural models
+- **SciMLSensitivity.jl** — Recommended for accurate gradients when training physics-informed models
+- **NeuralOperators.jl** — Reference neural operator implementations in the SciML ecosystem
+- **DiffEqFlux.jl** — Hybrid neural + classical differential equation models
+
+### 1.4 Supported Scientific ML Tooling (SOTA Stack)
+Hydrogen uses a tiered tooling strategy to remain at the current state of the art while keeping the system implementable and coherent.
+
+Primary (First-Class Support)
+Category	Tool	Role	Backend	Status
+Neural Operators	PhysicsNeMo + NeuralOperator	Main production neural operator stack	PyTorch	Core
+Neural Operators (JAX)	jNO	Preferred pure-JAX neural operator library	JAX	Core
+Symbolic Layer	ModelingToolkit.jl	Symbolic PDE representation, symmetries, conservation laws, Symbolic Gauntlet	Julia	Core
+Equation Discovery	DataDrivenDiffEq.jl + PySR	Symbolic Regression track	Julia / Python	Core
+Physics-Informed Training	SciMLSensitivity.jl	High-quality adjoints and sensitivity analysis	Julia	Core
+Secondary (Supported but Optional)
+Tool	Role	When to Use
+PINA	Unified PINN + Neural Operator framework	Hybrid experiments, rapid prototyping
+ΦFlow	Differentiable PDE solving	Hybrid neural + classical specialists
+DeepXDE	Mature PINN / DeepONet library	Reference implementations & validation
+NeuralPDE.jl	SciML PINN solvers	Complementary to ModelingToolkit
+DiffEqFlux.jl	Hybrid neural + differential equation models	Advanced hybrid strategies
+Experimental / Research Only
+Newer specialized operators, agentic discovery systems, and domain-specific industrial tools may be evaluated but are not first-class dependencies.
+
+3.1 Backbone Images — Framework Selection (Updated)
+Framework Selection
+Miners specify the backend in the Strategy JSON:
+
+"backend": "pytorch" | "jax" | "sciml"
+"pytorch" → PhysicsNeMo + NeuralOperator images (default production path)
+
+"jax" → jNO-based images (preferred pure-JAX path)
+
+"sciml" → NeuralOperators.jl + Lux images
+
+Cross-framework validation is performed via ONNX export/import where possible.
+
+5. Six Competition Tracks — Symbolic Regression (Updated)
+Track	Submission Format	What It Proves
+Symbolic Regression	Discovered PDE string + basis (via PySR or DataDrivenDiffEq.jl)	Can the agent discover the governing PDE from data?
+Miners/agents may specify the preferred discovery engine ("discovery_backend": "pysr" | "datadrivendiffeq"). PySR is the recommended default for most discovery tasks.
+
+14.8.6 Preferred SciML + External Stack
+Primary Stack
+
+PhysicsNeMo + NeuralOperator — Production neural operator path (PyTorch)
+
+jNO — Preferred pure-JAX neural operator library
+
+ModelingToolkit.jl — Primary symbolic engine
+
+PySR + DataDrivenDiffEq.jl — Equation discovery backends
+
+SciMLSensitivity.jl — Recommended for accurate physics-informed gradients
+
+Secondary / Optional
+
+PINA, ΦFlow, DeepXDE, NeuralPDE.jl, DiffEqFlux.jl
 
