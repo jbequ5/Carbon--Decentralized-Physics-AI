@@ -1,27 +1,29 @@
-# Docker image for running Hydrogen miners and agentic miners
+# User-friendly Docker image for Hydrogen miners and agentic miners
 
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies
+# System dependencies
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
 WORKDIR /app
 
-# Copy requirements first for better caching
+# Install Hydrogen
 COPY pyproject.toml .
-RUN pip install --upgrade pip
-RUN pip install -e .
+RUN pip install --upgrade pip && pip install -e .
 
-# Copy the rest of the code
+# Copy source code
 COPY . .
 
-# Default command runs the example agentic miner
-# Users can override this
+# Create helpful entrypoint
+COPY docker/miner/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "examples/run_agentic_miner.py"]
