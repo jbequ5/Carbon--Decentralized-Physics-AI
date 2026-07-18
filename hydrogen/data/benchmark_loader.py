@@ -1,14 +1,19 @@
-"""Benchmark data loader for Hydrogen.
+"""Benchmark data loader with NeuralOperator integration.
 
-Supports PDEBench and NeuralOperator standardized datasets.
+Tries to use neuraloperator dataset utilities when available.
 """
 
 import os
-from typing import Dict, Any, Tuple, Optional
+from typing import Optional, Tuple
 
-import h5py
 import torch
 from torch.utils.data import Dataset, DataLoader
+
+try:
+    from neuralop.datasets import load_darcy, load_burgers, load_poisson
+    NEURALOPERATOR_DATA_AVAILABLE = True
+except ImportError:
+    NEURALOPERATOR_DATA_AVAILABLE = False
 
 
 class PDEBenchDataset(Dataset):
@@ -17,6 +22,7 @@ class PDEBenchDataset(Dataset):
         self.split = split
         self.resolution = resolution
 
+        import h5py
         with h5py.File(file_path, "r") as f:
             self.keys = list(f.keys())
 
@@ -24,16 +30,13 @@ class PDEBenchDataset(Dataset):
         return len(self.keys)
 
     def __getitem__(self, idx):
+        import h5py
         with h5py.File(self.file_path, "r") as f:
             key = self.keys[idx]
             data = f[key][...]
 
         x = torch.tensor(data["input"], dtype=torch.float32)
         y = torch.tensor(data["output"], dtype=torch.float32)
-
-        if self.resolution:
-            # Simple resize if needed (placeholder)
-            pass
 
         return x, y
 
@@ -43,10 +46,7 @@ def get_pdebench_loader(
     data_dir: str = "./data/pdebench",
     batch_size: int = 8,
     split: str = "train",
-) -> DataLoader:
-    """
-    Returns a DataLoader for a PDEBench challenge.
-    """
+):
     filename_map = {
         "poisson_2d_v1": "poisson_2d.h5",
         "darcy_2d_v1": "darcy_2d.h5",
@@ -59,8 +59,7 @@ def get_pdebench_loader(
     file_path = os.path.join(data_dir, filename)
 
     if not os.path.exists(file_path):
-        # Fallback to synthetic data
-        print(f"[Data] PDEBench file not found for {challenge_id}, using synthetic data.")
+        print(f"[Data] PDEBench file not found for {challenge_id}, using synthetic.")
         return get_synthetic_loader(batch_size=batch_size)
 
     dataset = PDEBenchDataset(file_path, split=split)
@@ -68,7 +67,6 @@ def get_pdebench_loader(
 
 
 def get_synthetic_loader(batch_size: int = 8, resolution: Tuple[int, int] = (64, 64)):
-    """Fallback synthetic data loader."""
     class SyntheticDataset(Dataset):
         def __len__(self):
             return 100
@@ -83,8 +81,19 @@ def get_synthetic_loader(batch_size: int = 8, resolution: Tuple[int, int] = (64,
 
 def get_benchmark_loader(challenge_id: str, backbone: str = "default", **kwargs):
     """
-    Unified entrypoint. Tries PDEBench first, falls back to synthetic.
-    Can be extended to use NeuralOperator dataset utilities.
+    Unified benchmark loader.
+
+    Tries NeuralOperator datasets first (if available), then PDEBench, then synthetic.
     """
-    # Future: Check if neuraloperator has a loader for this challenge
+    if NEURALOPERATOR_DATA_AVAILABLE:
+        try:
+            if "darcy" in challenge_id:
+                return load_darcy(batch_size=kwargs.get("batch_size", 8), train_test_split="train")
+            elif "burgers" in challenge_id:
+                return load_burgers(batch_size=kwargs.get("batch_size", 8))
+            elif "poisson" in challenge_id:
+                return load_poisson(batch_size=kwargs.get("batch_size", 8))
+        except Exception:
+            pass  # Fall through to PDEBench
+
     return get_pdebench_loader(challenge_id, **kwargs)
