@@ -1,7 +1,6 @@
-"""Hydrogen Validator
+"""Hydrogen Validator (Improved)
 
-Main validator loop. Follows standard Bittensor patterns while integrating
-our Hydrogen scoring system.
+Main validator loop with logging, dry-run mode, and better structure.
 """
 
 import time
@@ -22,9 +21,12 @@ class Validator:
         self.active_challenges = getattr(config, "active_challenges", None) or [
             "poisson_2d_v1", "darcy_2d_v1", "burgers_v1"
         ]
+        self.dry_run = getattr(config, "dry_run", False)
+
+        bt.logging.info(f"Hydrogen Validator initialized. Dry run: {self.dry_run}")
 
     def run(self):
-        bt.logging.info("Starting Hydrogen Validator...")
+        bt.logging.info("Starting Hydrogen Validator loop...")
 
         while True:
             try:
@@ -32,10 +34,13 @@ class Validator:
                 scores = self._evaluate_miners()
 
                 if scores:
-                    self._set_weights(scores)
+                    if self.dry_run:
+                        bt.logging.info(f"[DRY RUN] Would set weights: {scores}")
+                    else:
+                        self._set_weights(scores)
 
             except Exception as e:
-                bt.logging.error(f"Validator error: {e}")
+                bt.logging.error(f"Validator loop error: {e}")
 
             time.sleep(self.config.evaluation_interval)
 
@@ -51,9 +56,8 @@ class Validator:
                 continue
 
             try:
-                score = self.scorer.score_strategy(
-                    uid=uid, hotkey=hotkey, strategy=strategy
-                )
+                score = self.scorer.score_strategy(uid, hotkey, strategy)
+                bt.logging.debug(f"UID {uid}: score = {score}")
                 scores[uid] = score
             except Exception as e:
                 bt.logging.warning(f"Failed to score uid {uid}: {e}")
@@ -74,10 +78,10 @@ class Validator:
             version_key=self.config.version_key,
             wait_for_finalization=True,
         )
+        bt.logging.info(f"Weights set for {len(uids)} uids")
 
     def _get_strategy_for_uid(self, uid: int) -> dict:
-        # Placeholder - in production this would come from chain or off-chain store
-        # For now returns a dummy strategy for testing
+        # TODO: Replace with real strategy retrieval (from chain or off-chain storage)
         return {
             "backbone": "physicsnemo_fno",
             "challenge_id": self.active_challenges[uid % len(self.active_challenges)],
