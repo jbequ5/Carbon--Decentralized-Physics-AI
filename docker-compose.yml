@@ -24,11 +24,11 @@ services:
       - HYDROGEN_HOTKEY=${HYDROGEN_HOTKEY:-}
       - HYDROGEN_WALLET=${HYDROGEN_WALLET:-}
       - HYDROGEN_API_KEY=${HYDROGEN_API_KEY:-}
-    # Default: run the example agentic miner
-    # Override command to run your own agent
+    # Default behavior: run the example agentic miner
+    # You can override the command to run your own agent
     command: python examples/run_agentic_miner.py
 
-  # Example: Run a custom agent script
+  # Example for running a completely custom agent
   # custom-agent:
   #   build:
   #     context: .
