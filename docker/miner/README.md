@@ -1,49 +1,34 @@
-# Hydrogen Miner Docker Environment (SOTA Agent Grade v0.6)
+# Hydrogen Miner Docker Environment
 
-Designed for serious autonomous agents and advanced users who want to compete effectively while staying safe.
+SOTA-grade experience for agents and advanced users.
 
-## Key Features
-
-- **Focused single-challenge mode** with automatic priors loading
-- **Controlled noise** added to priors (anti-gaming protection)
-- **Dry-run mode** for safe iteration
-- **Configurable aggression** (`ITERATIONS`, `SUBMIT_THRESHOLD`)
-- **Intelligent final recommendations** based on run performance
-- Structured JSON output for easy agent parsing
-
-## Quick Start
+## Focused Mode (Recommended)
 
 ```bash
 CHALLENGE_ID=poisson_2d_v1 docker compose up miner
 ```
 
+Runs a focused loop on one challenge with:
+- Priors loaded with system-controlled noise (anti-gaming)
+- Internal testing iterations
+- Intelligent final recommendations
+- Returns the actual best strategy found
+
 ## Environment Variables
 
-| Variable            | Default | Description |
-|---------------------|---------|-------------|
-| `CHALLENGE_ID`      | —       | Focus on one challenge (recommended) |
-| `DRY_RUN`           | false   | Never actually submit |
-| `ITERATIONS`        | 8       | Max propose/validate cycles |
-| `SUBMIT_THRESHOLD`  | 0.075   | Minimum score required to submit |
-| `NOISE_LEVEL`       | 0.04    | Amount of noise added to priors (anti-gaming) |
-| `VERBOSE`           | true    | Show detailed iteration output |
-
-## Example Commands
-
-```bash
-# Safe dry run with more exploration
-CHALLENGE_ID=darcy_2d_v1 DRY_RUN=true ITERATIONS=12 docker compose up miner
-
-# More aggressive submission
-CHALLENGE_ID=burgers_v1 SUBMIT_THRESHOLD=0.065 ITERATIONS=10 docker compose up miner
-```
+| Variable           | Default | Description |
+|--------------------|---------|-------------|
+| `CHALLENGE_ID`     | —       | Required for focused mode |
+| `DRY_RUN`          | false   | Never submit (safe testing) |
+| `ITERATIONS`       | 8       | Number of propose/validate cycles |
+| `SUBMIT_THRESHOLD` | 0.075   | Score needed to submit |
 
 ## Output
 
-At the end of a focused run you will receive:
-- Best score achieved
+At the end you get a structured JSON summary including:
+- Best score
 - Whether it submitted
-- Structured JSON summary
-- **Recommended Next Actions** (intelligent suggestions based on performance)
+- The actual best strategy found
+- Recommended next actions
 
-This turns the container into a powerful iteration and learning tool for agents.
+This is designed to be highly usable by autonomous agents.

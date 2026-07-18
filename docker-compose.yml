@@ -28,5 +28,4 @@ services:
       - DRY_RUN=${DRY_RUN:-false}
       - ITERATIONS=${ITERATIONS:-8}
       - SUBMIT_THRESHOLD=${SUBMIT_THRESHOLD:-0.075}
-      - NOISE_LEVEL=${NOISE_LEVEL:-0.04}
     command: python examples/run_agentic_miner.py
