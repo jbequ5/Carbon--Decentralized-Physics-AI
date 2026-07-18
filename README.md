@@ -1,81 +1,81 @@
 # Hydrogen
 
-**Decentralized Physics-Informed Neural Operator Subnet for Bittensor**
+**A Bittensor subnet for decentralized discovery of physics-informed neural operators.**
 
-Hydrogen is a Bittensor subnet where miners compete to discover better physics-informed neural operators for solving Partial Differential Equations (PDEs). The system emphasizes **verifiable physics correctness** through hidden stress testing, hard physics gates, and causal reasoning.
+Hydrogen turns the problem of solving complex Partial Differential Equations (PDEs) into a competitive, self-improving knowledge economy. Miners compete by proposing better training strategies. Validators evaluate them under hidden stress conditions with real physics constraints. A causal reasoning layer (the Landscape Agent) identifies what actually works and distills it into reusable specialists.
 
-## Current Architecture
+## The Problem
 
-```
-Miners
-  ↓ submit strategy JSON (backbone, loss weights, curriculum, UQ)
-Validators
-  ↓ run get_evaluation_plan() → train + hidden stress test + physics gates
-Landscape Agent
-  ↓ causal inference (Double ML + CATE) + novelty scoring
-  ↓ distill top candidates → Specialist Bank
-  ↓ auto-generate improved published priors
-Specialist Bank
-  ↓ versioned, validated specialists
-```
+Traditional scientific machine learning is centralized:
+- One team trains one model on fixed benchmarks
+- Easy to overfit to public data
+- Physics constraints are often soft penalties rather than hard requirements
+- Knowledge doesn't compound across teams
 
-## Key Components
-
-| Component              | Status     | Description |
-|------------------------|------------|-------------|
-| **Backbone Registry**  | Complete   | Supports PhysicsNeMo + NeuralOperator models (FNO, DeepONet, UNO) |
-| **Unified Trainer**    | Complete   | Multi-backbone training with validation loop |
-| **Benchmark Loader**   | Complete   | PDEBench + fallback + NeuralOperator extensibility |
-| **Evaluation Plans**   | Complete   | Team-controlled routing for train / stress / benchmark |
-| **Landscape Agent**    | Advanced   | Causal inference, novelty-aware distillation, auto prior generation |
-| **Specialist Bank**    | Functional | Register and query distilled specialists |
-| **Emission Mechanics** | Complete   | 75% Breakthrough Bounties + 25% Decaying Top-2 Stipend |
+Hydrogen decentralizes this process using Bittensor incentives while enforcing **verifiable physics correctness**.
 
 ## How It Works
 
-1. **Miners** submit training strategies (not model weights).
-2. **Validators** execute team-defined evaluation plans:
-   - Train on benchmark data
-   - Run hidden procedural stress tests with physics gates
-   - Score using real ground truth from benchmark hold-outs
-3. **Landscape Agent** uses causal inference to identify valuable strategies and distills them into reusable specialists.
-4. Improved priors are automatically published back to miners.
+### 1. Miners Submit Strategies
+Miners don't upload model weights. They submit **training strategies** — JSON configs that specify:
+- Which neural operator backbone to use (FNO, DeepONet, PhysicsNeMo, etc.)
+- Loss weight vectors
+- Curriculum learning schedule
+- Uncertainty quantification method
 
-Miners do **not** control data splits or stress conditions — these are defined by the team in the validator code.
+This lowers the barrier to entry dramatically. A clever researcher with a good idea can compete without needing a large GPU cluster.
 
-## Anti-Gaming Features
+### 2. Validators Run Team-Defined Evaluation Plans
+Validators execute a clear evaluation pipeline defined by the team:
 
-- Hidden procedural stress tests
-- Hard physics gates (divergence, energy stability, boundary conditions)
-- Adaptive stress difficulty with anti-sandbagging (EMA + noise)
-- Real ground truth from benchmark test splits
-- No miner control over evaluation data
+- Train on public benchmark data
+- Run **hidden procedural stress tests** with hard physics gates (divergence-free, energy stability, boundary conditions, rollout stability)
+- Score using real ground truth from benchmark hold-out sets
+
+Miners have no visibility into the stress conditions or data splits used for evaluation. This prevents overfitting to public data.
+
+### 3. The Landscape Agent (The Brain)
+This is Hydrogen's most distinctive component.
+
+The Landscape Agent continuously analyzes all submitted strategies using causal inference (Double Machine Learning + Heterogeneous Treatment Effects). It answers questions like:
+
+> "Does increasing the PDE residual weight actually cause better stress performance — and under what conditions?"
+
+It only proposes distillation when there is positive causal evidence of improvement. Successful strategies are distilled into compact, reusable **specialists** and stored in the Specialist Bank. Improved priors are automatically published back to miners.
+
+### 4. Specialist Bank
+High-quality distilled models are versioned, regression-tested, and made available with metadata (validity domains, performance metrics). This creates a growing library of composable, physics-aware components.
+
+### 5. Emissions (75/25 Model)
+- **75%** goes to Breakthrough Bounties — large rewards when someone sets a new record on hidden stress tests.
+- **25%** goes to a Decaying Top-2 Stipend — only current leaders earn this, and it decays without continued improvement.
+
+Strong anti-gaming measures are built in: hidden procedural stress, hard physics gates, adaptive difficulty with anti-sandbagging, and no miner control over evaluation data.
+
+## Key Technical Features
+
+- **Multi-backbone support**: Works with both NVIDIA PhysicsNeMo and the open-source NeuralOperator library (FNO, DeepONet, UNO).
+- **Benchmark-driven training**: Real PDEBench data with fallback to synthetic.
+- **Explicit evaluation plans**: Team-controlled routing for training, stress testing, and benchmarking.
+- **Causal reasoning**: Double ML + CATE to understand what actually improves performance.
+- **Automatic prior improvement**: The system generates better published priors after successful distillation.
+
+## Current Status
+
+Hydrogen has a working multi-backbone training pipeline, benchmark loading, explicit evaluation plans with adaptive stress testing, a Landscape Agent with causal inference, and a functional Specialist Bank. The emission mechanics and anti-gaming layers are implemented.
+
+The system is designed so that **only verifiable, physics-correct generalization** reliably earns rewards.
 
 ## Getting Started
 
 ```bash
-# Clone
 git clone https://github.com/jbequ5/Hydrogen.git
 cd Hydrogen
-
-# Install
 pip install -e .
-
-# Run validator (example)
-python -m neurons.validator
 ```
 
-## Project Structure
+See `SPEC.md` for a more detailed technical specification of the current implementation.
 
-- `hydrogen/` — Core library (backbones, training, evaluation, landscape, specialist bank)
-- `neurons/` — Bittensor validator/miner nodes
-- `docker/` — Validator Docker images
-- `scripts/` — Utility scripts
+## Philosophy
 
-## Status
-
-Hydrogen is in active development. The core evaluation pipeline, multi-backbone support, benchmark loading, and Landscape Agent with causal reasoning are functional.
-
-## License
-
-To be determined.
+Hydrogen is built on the principle that the incentive structure *is* the product. By making hidden stress testing, hard physics gates, and causal reasoning the things that pay, we align decentralized participation with genuine scientific progress.
