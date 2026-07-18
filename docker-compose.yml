@@ -13,9 +13,23 @@ services:
       - .:/app
     command: python3 -m neurons.validator
 
-  # Example: You can create additional profiles for specialized images
-  # validator-neuralop:
+  miner:
+    build:
+      context: .
+      dockerfile: docker/miner/Dockerfile
+    image: hydrogen-miner:latest
+    volumes:
+      - .:/app
+    environment:
+      - HYDROGEN_HOTKEY=${HYDROGEN_HOTKEY:-}
+      - HYDROGEN_WALLET=${HYDROGEN_WALLET:-}
+    command: python examples/run_agentic_miner.py
+
+  # Example for running a custom agent
+  # agent:
   #   build:
   #     context: .
-  #     dockerfile: docker/validator/Dockerfile
-  #   # Add specific env or args if needed
+  #     dockerfile: docker/miner/Dockerfile
+  #   volumes:
+  #     - .:/app
+  #   command: python your_custom_agent.py
