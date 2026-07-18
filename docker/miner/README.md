@@ -1,46 +1,49 @@
-# Hydrogen Miner Docker Environment (Agent Optimized v0.5)
+# Hydrogen Miner Docker Environment (SOTA Agent Grade v0.6)
 
-Designed for both humans and autonomous agents who want to compete effectively.
+Designed for serious autonomous agents and advanced users who want to compete effectively while staying safe.
 
-## Quick Start - Focused Mode (Recommended)
+## Key Features
+
+- **Focused single-challenge mode** with automatic priors loading
+- **Controlled noise** added to priors (anti-gaming protection)
+- **Dry-run mode** for safe iteration
+- **Configurable aggression** (`ITERATIONS`, `SUBMIT_THRESHOLD`)
+- **Intelligent final recommendations** based on run performance
+- Structured JSON output for easy agent parsing
+
+## Quick Start
 
 ```bash
 CHALLENGE_ID=poisson_2d_v1 docker compose up miner
 ```
 
-## Control via Environment Variables
+## Environment Variables
 
-| Variable           | Default | Description |
-|--------------------|---------|-------------|
-| `CHALLENGE_ID`     | —       | Focus on a single challenge (strongly recommended) |
-| `DRY_RUN`          | false   | Never submit (safe for development) |
-| `ITERATIONS`       | 8       | Max propose/validate cycles |
-| `SUBMIT_THRESHOLD` | 0.075   | Only submit if best score meets or exceeds this |
-| `VERBOSE`          | true    | Show detailed iteration output |
+| Variable            | Default | Description |
+|---------------------|---------|-------------|
+| `CHALLENGE_ID`      | —       | Focus on one challenge (recommended) |
+| `DRY_RUN`           | false   | Never actually submit |
+| `ITERATIONS`        | 8       | Max propose/validate cycles |
+| `SUBMIT_THRESHOLD`  | 0.075   | Minimum score required to submit |
+| `NOISE_LEVEL`       | 0.04    | Amount of noise added to priors (anti-gaming) |
+| `VERBOSE`           | true    | Show detailed iteration output |
 
-## Example Runs
+## Example Commands
 
 ```bash
-# Safe dry run with more iterations
+# Safe dry run with more exploration
 CHALLENGE_ID=darcy_2d_v1 DRY_RUN=true ITERATIONS=12 docker compose up miner
 
-# More aggressive submission behavior
-CHALLENGE_ID=burgers_v1 SUBMIT_THRESHOLD=0.06 ITERATIONS=10 docker compose up miner
+# More aggressive submission
+CHALLENGE_ID=burgers_v1 SUBMIT_THRESHOLD=0.065 ITERATIONS=10 docker compose up miner
 ```
 
 ## Output
 
-The container now produces a clear JSON summary at the end with:
+At the end of a focused run you will receive:
 - Best score achieved
 - Whether it submitted
-- Number of iterations run
-- Dry run status
+- Structured JSON summary
+- **Recommended Next Actions** (intelligent suggestions based on performance)
 
-This makes it easy for agents to parse results programmatically.
-
-## Running Custom Agents
-
-Mount and run your own script:
-```bash
-docker compose run miner python my_custom_agent.py
-```
+This turns the container into a powerful iteration and learning tool for agents.
