@@ -1,62 +1,81 @@
-# Hydrogen: Bittensor Subnet for Physical Intelligence
+# Hydrogen
 
-**A decentralized, incentive-aligned system for compounding knowledge about training physics-informed neural operators (PINO, FNO, DeepONet, etc.).**
+**Decentralized Physics-Informed Neural Operator Subnet for Bittensor**
 
-Physics ML has the right architectures (discretization-invariant neural operators) and libraries (PhysicsNeMo, NeuralOperator). What it lacks is a system that turns tribal training tricks into verifiable, compounding, physics-enforced progress.
+Hydrogen is a Bittensor subnet where miners compete to discover better physics-informed neural operators for solving Partial Differential Equations (PDEs). The system emphasizes **verifiable physics correctness** through hidden stress testing, hard physics gates, and causal reasoning.
 
-Hydrogen makes **physics the hard constraint** (binary gates on mass conservation, energy dissipation, rollout stability, UQ calibration, boundaries) and uses causal inference + symbolic reasoning to discover *what actually works* across PDE families.
+## Current Architecture
 
-Miners submit training strategies (JSON configs), never weights or GPUs. Validators run pinned, reproducible environments and enforce physics. The Landscape Agent runs Double ML on every submission to extract causal effects and evolve better baselines. Winning strategies are distilled into composable, symbolically-annotated ONNX specialists.
+```
+Miners
+  ↓ submit strategy JSON (backbone, loss weights, curriculum, UQ)
+Validators
+  ↓ run get_evaluation_plan() → train + hidden stress test + physics gates
+Landscape Agent
+  ↓ causal inference (Double ML + CATE) + novelty scoring
+  ↓ distill top candidates → Specialist Bank
+  ↓ auto-generate improved published priors
+Specialist Bank
+  ↓ versioned, validated specialists
+```
 
-## Current Status (July 2026)
+## Key Components
 
-- **Phase 0 MVP in active development**: Core flywheel (challenges → strategy submission → physics-gated validation → causal baseline updates).
-- Starting with 3 single-physics PDEs (Poisson 2D, Darcy 2D, Burgers) for rapid iteration on reproducibility, determinism, and incentive mechanics.
-- Full vision (7+ PDEs, multi-physics composition, 3D turbulence bridge, Foundation Operator/LPM, edge HIL, agent swarms) remains the north star but is gated behind working Phase 0.
-- Repo contains detailed specs + appendices. Implementation scaffolding underway.
+| Component              | Status     | Description |
+|------------------------|------------|-------------|
+| **Backbone Registry**  | Complete   | Supports PhysicsNeMo + NeuralOperator models (FNO, DeepONet, UNO) |
+| **Unified Trainer**    | Complete   | Multi-backbone training with validation loop |
+| **Benchmark Loader**   | Complete   | PDEBench + fallback + NeuralOperator extensibility |
+| **Evaluation Plans**   | Complete   | Team-controlled routing for train / stress / benchmark |
+| **Landscape Agent**    | Advanced   | Causal inference, novelty-aware distillation, auto prior generation |
+| **Specialist Bank**    | Functional | Register and query distilled specialists |
+| **Emission Mechanics** | Complete   | 75% Breakthrough Bounties + 25% Decaying Top-2 Stipend |
 
-## Key Innovations
+## How It Works
 
-- **Hard Physics Gates**: Binary pass/fail (no "good enough"). Score = 0 on failure.
-- **Causal Knowledge Compounding**: Landscape Agent uses Double ML on StrategyFragment DAG to estimate `P(improvement | do(param))` instead of correlations.
-- **Symbolic Layer**: Pre-computed metadata (symmetries, conservation laws, suggested loss weights) from ModelingToolkit.jl principles. Auto loss weighting and future acausal composition / codegen.
-- **Incentive Alignment**: Top-4 per challenge (40/30/20/10) + novelty/symbolic bonuses. Submission fees. Validators paid for reliable physics checks.
-- **Agent-Native Future**: DID + A2A protocols, swarms, reputation (deferred to post-Phase 0).
+1. **Miners** submit training strategies (not model weights).
+2. **Validators** execute team-defined evaluation plans:
+   - Train on benchmark data
+   - Run hidden procedural stress tests with physics gates
+   - Score using real ground truth from benchmark hold-outs
+3. **Landscape Agent** uses causal inference to identify valuable strategies and distills them into reusable specialists.
+4. Improved priors are automatically published back to miners.
 
-## Getting Started (Phase 0 MVP)
+Miners do **not** control data splits or stress conditions — these are defined by the team in the validator code.
 
-See `SPEC.md` for the authoritative technical specification (miner/validator interfaces, physics gates, scoring, Landscape, emission mechanics).
+## Anti-Gaming Features
 
-See `roadmap.md` for phased milestones and exit criteria.
+- Hidden procedural stress tests
+- Hard physics gates (divergence, energy stability, boundary conditions)
+- Adaptive stress difficulty with anti-sandbagging (EMA + noise)
+- Real ground truth from benchmark test splits
+- No miner control over evaluation data
 
-**For miners**: Lightweight CLI + Python SDK (coming in initial scaffolding). Submit strategy JSONs. No GPU required.
+## Getting Started
 
-**For validators**: Pinned Docker images (`hydrogen/validator:pino-v0.1` etc.) with deterministic training harness. 3+ validators for median consensus.
+```bash
+# Clone
+git clone https://github.com/jbequ5/Hydrogen.git
+cd Hydrogen
 
-**For researchers/agents**: Structured feedback includes physics gate breakdown, causal insights from Landscape, and suggested improvements.
+# Install
+pip install -e .
 
-## Repository Structure (Current)
+# Run validator (example)
+python -m neurons.validator
+```
 
-- `README.md` — This file (vision + status).
-- `SPEC.md` — Consolidated technical specification (deduplicated, Phase 0 focus + full vision references).
-- `roadmap.md` — Execution phases, deliverables, risks, revenue path.
-- `Launch_Spec.md` — Legacy Phase 0-focused variant (being aligned into SPEC.md).
-- `Appendices/` — Detailed runtime specs (validator, miner CLI, dashboard, dev environment, testing, runbook).
-- Implementation code (neurons/, hydrogen/ package, Dockerfiles) being added now.
+## Project Structure
 
-## Why Bittensor?
+- `hydrogen/` — Core library (backbones, training, evaluation, landscape, specialist bank)
+- `neurons/` — Bittensor validator/miner nodes
+- `docker/` — Validator Docker images
+- `scripts/` — Utility scripts
 
-The subnet *is* the product. Incentives force optimization for verifiable physics improvement under hidden stress tests. Knowledge compounds autonomously. Barrier to entry is a good idea, not a GPU cluster.
+## Status
 
-## Market Opportunity
+Hydrogen is in active development. The core evaluation pipeline, multi-backbone support, benchmark loading, and Landscape Agent with causal reasoning are functional.
 
-Real-time physics surrogates for aerospace, automotive, energy, manufacturing, biomedical, robotics. TAM $135B+ for edge HIL + digital twins. Dual-licensed specialists (AGPL-3.0 + commercial) + data royalties + composition engine licensing.
+## License
 
-## Contributing & Contact
-
-Active development. Issues and PRs welcome once core scaffolding lands.
-
-X: @dTAO_Dad
-GitHub: jbequ5/Hydrogen
-
-*Hydrogen: Where every training run teaches the network. Physics is the only metric that pays.*
+To be determined.
