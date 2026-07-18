@@ -1,15 +1,12 @@
-"""Causal Knowledge Base with publishable (noisy) leading priors.
+"""Causal Knowledge Base with Heterogeneous Treatment Effects (CATE).
 
-Designed so the full Landscape stays proprietary, while still allowing
-miners to build off the current leader in a controlled way.
-
-Publishing strategy: Daily per challenge + backbone with added noise.
+Now supports estimating how treatment effects vary across contexts
+(e.g. high vs low Reynolds, different permeability ranges).
 """
 
 import json
 import os
 import time
-import random
 from typing import Dict, Any, List, Optional, Tuple
 
 import numpy as np
@@ -31,13 +28,6 @@ from .storage import save_symbolic_artifact, load_symbolic_artifacts
 
 
 class CausalKnowledgeBase:
-    """
-    Challenge- and backbone-aware causal knowledge base.
-
-    Supports publishing noisy versions of the current best priors daily.
-    Full access remains proprietary. Miners only see the published version.
-    """
-
     def __init__(self, storage_dir: str = "./data/landscape"):
         self.storage_dir = storage_dir
         os.makedirs(storage_dir, exist_ok=True)
@@ -167,72 +157,98 @@ class CausalKnowledgeBase:
         )
         return result
 
-    def get_best_priors(
+    def estimate_heterogeneous_effects(
         self,
         challenge_id: str,
         backbone: str = "PINO",
+        treatment_key: str = "pde_residual_weight",
+        min_samples: int = 40,
     ) -> Dict[str, Any]:
+        """
+        Estimate Heterogeneous Treatment Effects (CATE).
+
+        Returns average treatment effect + simple stratification
+        by feature values (e.g. high vs low Reynolds).
+        """
         key = self._make_key(challenge_id, backbone)
-        causal = self.causal_estimates.get(key, {})
-
-        scoring = load_symbolic_artifacts(
-            artifact_type="pysr_scoring",
+        artifacts = load_symbolic_artifacts(
+            artifact_type="causal_observation",
             challenge_id=challenge_id,
-            limit=5,
-        )
-        weights = load_symbolic_artifacts(
-            artifact_type="evolved_loss_weights",
-            challenge_id=challenge_id,
-            limit=5,
+            limit=1000,
         )
 
-        best_loss_vector = {}
-        if weights:
-            best_loss_vector = weights[0].get("content", {}).get("loss_vector", {})
+        filtered = [a for a in artifacts if a.get("content", {}).get("backbone", "default") == backbone]
+        if len(filtered) < min_samples:
+            return {"status": "insufficient_data", "n": len(filtered)}
 
-        best_scoring_expr = None
-        if scoring:
-            best_scoring_expr = scoring[0].get("content", {}).get("expression")
+        # Build dataset
+        data = []
+        for art in filtered:
+            content = art.get("content", {})
+            if treatment_key not in content.get("treatment", {}):
+                continue
+            row = {
+                "treatment": content["treatment"][treatment_key],
+                "outcome": content["outcome"],
+            }
+            row.update(content.get("features", {}))
+            data.append(row)
 
-        return {
+        if len(data) < min_samples:
+            return {"status": "insufficient_data_after_filtering", "n": len(data)}
+
+        import pandas as pd
+        from sklearn.linear_model import Ridge
+        from sklearn.model_selection import cross_val_predict
+
+        df = pd.DataFrame(data)
+        feature_cols = [c for c in df.columns if c not in ["treatment", "outcome"]]
+
+        if not feature_cols:
+            return {"status": "no_features"}
+
+        X = df[feature_cols].values
+        T = df["treatment"].values
+        Y = df["outcome"].values
+
+        # Simple CATE via interaction model
+        X_interact = np.column_stack([X, X * T.reshape(-1, 1)])
+
+        mu_y = cross_val_predict(Ridge(), X_interact, Y, cv=5)
+        residual_y = Y - mu_y
+
+        # Estimate interaction effects
+        from sklearn.linear_model import LinearRegression
+        interaction_model = LinearRegression().fit(X_interact, residual_y)
+
+        # Average treatment effect
+        ate = np.mean(T * residual_y) / (np.var(T) + 1e-8)
+
+        # Simple stratification (e.g. by first feature)
+        if len(feature_cols) > 0:
+            feat_name = feature_cols[0]
+            high_mask = X[:, 0] > np.median(X[:, 0])
+            ate_high = np.mean(T[high_mask] * residual_y[high_mask]) / (np.var(T[high_mask]) + 1e-8)
+            ate_low = np.mean(T[~high_mask] * residual_y[~high_mask]) / (np.var(T[~high_mask]) + 1e-8)
+        else:
+            ate_high = ate_low = ate
+
+        result = {
+            "status": "success",
+            "method": "interaction_model_cate",
+            "ate": float(ate),
+            "ate_high": float(ate_high),
+            "ate_low": float(ate_low),
+            "feature": feature_cols[0] if feature_cols else None,
+            "n_samples": len(Y),
             "challenge_id": challenge_id,
             "backbone": backbone,
-            "causal_estimate": causal,
-            "recommended_loss_vector": best_loss_vector,
-            "recommended_scoring_expression": best_scoring_expr,
-            "last_updated": causal.get("timestamp") or int(time.time()),
         }
 
-    def get_publishable_priors(
-        self,
-        challenge_id: str,
-        backbone: str = "PINO",
-        noise_level: float = 0.03,
-    ) -> Dict[str, Any]:
-        """
-        Return a noisy version of the current best priors.
-
-        This is what should be published daily per challenge + backbone.
-        The noise prevents exact copying while still giving miners a strong
-        starting point (they are incentivized to improve upon it).
-        """
-        best = self.get_best_priors(challenge_id, backbone=backbone)
-
-        # Add noise to loss vector
-        noisy_loss = {}
-        for k, v in best.get("recommended_loss_vector", {}).items():
-            noise = random.gauss(0, noise_level)
-            noisy_loss[k] = max(0.05, v * (1 + noise))
-
-        return {
-            "challenge_id": challenge_id,
-            "backbone": backbone,
-            "loss_vector": noisy_loss,
-            "scoring_expression": best.get("recommended_scoring_expression"),
-            "noise_level": noise_level,
-            "published_at": int(time.time()),
-            "based_on": best.get("last_updated"),
-        }
-
-    def update_from_observations(self, challenge_id: str, backbone: str = "PINO"):
-        return self.estimate_causal_effects(challenge_id, backbone=backbone)
+        save_symbolic_artifact(
+            artifact_type="cate_estimate",
+            challenge_id=challenge_id,
+            content=result,
+            metadata={"source": "CausalKnowledgeBase"},
+        )
+        return result

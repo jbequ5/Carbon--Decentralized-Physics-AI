@@ -1,7 +1,6 @@
-"""Landscape Agent with Cause-Aware Distillation (SOTA version).
+"""Landscape Agent with CATE + Novelty-Aware Distillation.
 
-Uses causal inference on benchmark + stress performance to decide
-what and when to distill. Aligns with physics-correct progress only.
+Implements both heterogeneous treatment effects and improved novelty scoring.
 """
 
 import time
@@ -56,12 +55,18 @@ class LandscapeAgent:
 
         for challenge_id in challenge_ids:
             for backbone in ["PINO"]:
-                # Estimate causal effects using benchmark + stress performance
                 causal_result = self.kb.estimate_causal_effects(
                     challenge_id, backbone=backbone
                 )
                 if causal_result.get("status") == "success":
                     print(f"  [{challenge_id}/{backbone}] Causal ATE: {causal_result.get('ate', 0):.4f}")
+
+                # Also estimate heterogeneous effects
+                cate_result = self.kb.estimate_heterogeneous_effects(
+                    challenge_id, backbone=backbone
+                )
+                if cate_result.get("status") == "success":
+                    print(f"  [{challenge_id}/{backbone}] CATE estimated (high vs low feature)")
 
         self.last_update = int(time.time())
         print("[Landscape] Daily update complete.")
@@ -73,12 +78,7 @@ class LandscapeAgent:
         top_k: int = 3,
     ) -> List[Dict[str, Any]]:
         """
-        Cause-aware candidate selection.
-
-        Ranks candidates using:
-        - Causal effect strength (from Double ML on benchmark/stress performance)
-        - Recent stress performance
-        - Novelty relative to current best
+        Novelty + Causal aware candidate selection.
         """
         candidates = []
 
@@ -93,36 +93,41 @@ class LandscapeAgent:
         )
         causal_ate = causal.get("ate", 0.0)
 
-        # Only consider candidates if there is positive causal signal
         if causal_ate <= 0.01:
-            print(f"[{challenge_id}] Weak causal signal (ATE={causal_ate:.4f}). Skipping distillation.")
+            print(f"[{challenge_id}] Weak causal signal. Skipping distillation.")
             return []
 
         for i, artifact in enumerate(weight_artifacts[:top_k]):
             content = artifact.get("content", {})
+            loss_vector = content.get("loss_vector", {})
+
+            # Simple novelty score: average absolute deviation from current best
+            novelty = 0.0
+            if loss_vector:
+                # Compare to a simple uniform prior as baseline
+                avg_dev = np.mean([abs(v - 1.0) for v in loss_vector.values()])
+                novelty = min(1.0, avg_dev)
+
+            combined_score = causal_ate * 0.7 + novelty * 0.3
+
             candidate = {
                 "rank": i + 1,
                 "challenge_id": challenge_id,
                 "backbone": backbone,
-                "loss_vector": content.get("loss_vector", {}),
+                "loss_vector": loss_vector,
                 "causal_ate": causal_ate,
-                "source_artifact": artifact.get("timestamp"),
+                "novelty_score": novelty,
+                "combined_score": combined_score,
                 "recommended_for_distillation": True,
             }
             candidates.append(candidate)
 
-        return candidates
+        # Sort by combined causal + novelty score
+        candidates = sorted(candidates, key=lambda x: x["combined_score"], reverse=True)
+        return candidates[:top_k]
 
     def run_full_daily_cycle(self):
-        """
-        SOTA daily cycle:
-        1. Run causal + symbolic update (using benchmark + stress data)
-        2. For each challenge, propose cause-aware distillation candidates
-        3. Distill only when causal evidence is positive
-        4. Register successful specialists
-        5. (Future) Publish improved priors
-        """
-        print("\n[Landscape] === Starting Full Daily Cycle ===")
+        print("\n[Landscape] === Starting Full Daily Cycle (Causal + Novelty) ===")
 
         self.run_daily_update()
 
@@ -141,7 +146,7 @@ class LandscapeAgent:
             if not candidates:
                 continue
 
-            print(f"[{challenge_id}] Distilling {len(candidates)} cause-backed candidates...")
+            print(f"[{challenge_id}] Distilling {len(candidates)} cause + novelty backed candidates...")
 
             for candidate in candidates:
                 strategy = {
@@ -169,7 +174,11 @@ class LandscapeAgent:
                         artifact_type="specialist",
                         challenge_id=challenge_id,
                         content=specialist,
-                        metadata={"source": "LandscapeAgent", "causal_ate": candidate.get("causal_ate")},
+                        metadata={
+                            "source": "LandscapeAgent",
+                            "causal_ate": candidate.get("causal_ate"),
+                            "novelty_score": candidate.get("novelty_score"),
+                        },
                     )
 
         print("[Landscape] === Daily Cycle Complete ===\n")
