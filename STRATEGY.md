@@ -1,77 +1,123 @@
 # STRATEGY.md — Miner Strategy Guide for Hydrogen
 
-This guide explains how to write effective strategies for the Hydrogen subnet.
+This guide explains how to write effective strategies for the Hydrogen subnet. The goal is to **democratize access** — you don’t need to be an expert to compete.
 
 ## What is a Strategy?
 
-A strategy is a JSON configuration that tells the validator **how** to train your model. You do **not** upload model weights — only the training recipe.
-
-The validator will:
-1. Train a model using your strategy on public benchmark data.
-2. Test it under hidden stress conditions with hard physics gates.
-3. Score you based on improvement + physics correctness.
-
-Your goal is to produce a strategy that generalizes well under unseen conditions while respecting physics.
+A strategy is a JSON file that describes **how** to train your model. You submit the recipe, not the weights. The validator trains a model using your configuration and evaluates it under hidden stress conditions with hard physics constraints.
 
 ---
 
-## Strategy Fields Reference
+## Using Symbolically Recommended Configurations (Recommended Starting Point)
+
+One of the best ways to create a strong strategy quickly is to start with **symbolically and causally recommended configurations** provided by the system.
+
+### Why This Matters
+
+The Landscape Agent continuously analyzes past submissions using causal inference. It discovers which design choices (loss weights, curriculum settings, etc.) actually improve performance. These insights are turned into **priors** that are published for all miners.
+
+Using these priors gives you a strong, evidence-based starting point instead of guessing.
+
+### How to Get Recommended Configurations
+
+```bash
+# See the current baseline performance for a challenge
+hydrogen-miner baseline poisson_2d_v1
+
+# Get symbolically/causally recommended priors
+hydrogen-miner priors poisson_2d_v1
+```
+
+The `priors` command returns suggested values such as:
+- Recommended `loss_vector` weights
+- Curriculum settings that have shown positive causal effects
+- Other features discovered by the Landscape
+
+### How to Use Them in Your Strategy
+
+```json
+{
+  "backbone": "fno",
+  "pino": {
+    "loss_vector": {
+      "pde_residual": 1.0,
+      "conservation_mass": 1.3,      // from priors
+      "boundary": 0.7                    // from priors
+    }
+  },
+  "curriculum_learning": {
+    "enabled": true,
+    "start_resolution": [64, 64],
+    "ramp_epochs": 45
+  }
+}
+```
+
+**Tip:** Always start with the priors and then make small, thoughtful adjustments. This is the fastest way to produce competitive strategies.
+
+---
+
+## Full Strategy Fields Reference
 
 ### Core Fields
 
-| Field              | Type     | Description                                      | Recommended Range / Notes                  |
+| Field              | Type     | Description                                      | Recommended / Notes                        |
 |--------------------|----------|--------------------------------------------------|--------------------------------------------|
-| `backbone`         | string   | Neural operator architecture                     | `fno`, `deeponet`, `uno`, `physicsnemo_fno` |
-| `resolution`       | list     | Training resolution                              | Usually `[128, 128]` or challenge default  |
+| `backbone`         | string   | Neural operator to use                           | `fno`, `deeponet`, `uno`, `physicsnemo_fno` |
+| `resolution`       | list     | Spatial/temporal resolution                      | Match challenge default                    |
 
 ### Loss & Physics
 
 | Field                    | Type   | Description                                      | Notes                                      |
 |--------------------------|--------|--------------------------------------------------|--------------------------------------------|
-| `pino.loss_vector`       | dict   | Weights for different loss terms                 | Use priors from `hydrogen-miner priors`    |
-| `physics_loss_weight`    | float  | Overall multiplier for physics loss              | 0.5 – 2.0 (default ~1.0)                   |
+| `pino.loss_vector`       | dict   | Per-term loss weights                            | Strongly recommended to start from priors  |
+| `physics_loss_weight`    | float  | Global multiplier on all physics losses          | 0.6 – 1.5 (start near 1.0)                 |
 
-### Optimizer & Training
+### Optimizer & Learning
 
-| Field                | Type   | Description                           | Recommended                          |
-|----------------------|--------|---------------------------------------|--------------------------------------|
-| `optimizer`          | str    | Optimizer type                        | `AdamW` (default), `Adam`, `SGD`     |
-| `learning_rate`      | float  | Learning rate                         | 1e-4 – 5e-3                          |
-| `weight_decay`       | float  | Weight decay (L2 regularization)      | 1e-5 – 1e-3                          |
-| `scheduler`          | str    | Learning rate scheduler               | `CosineAnnealingLR` (recommended)    |
-| `batch_size`         | int    | Batch size                            | 4 – 16 (depends on GPU memory)       |
-| `epochs`             | int    | Number of training epochs             | 80 – 200                             |
+| Field                | Type   | Description                           | Recommended Values                  |
+|----------------------|--------|---------------------------------------|-------------------------------------|
+| `optimizer`          | str    | Optimizer                             | `AdamW` (default), `Adam`, `SGD`    |
+| `learning_rate`      | float  | Learning rate                         | 3e-4 – 2e-3                         |
+| `weight_decay`       | float  | L2 regularization                     | 1e-5 – 5e-4                         |
+| `scheduler`          | str    | LR scheduler                          | `CosineAnnealingLR` (recommended)   |
 
-### Advanced Training Controls
+### Advanced Controls
 
 | Field                    | Type    | Description                                      | Notes                                      |
 |--------------------------|---------|--------------------------------------------------|--------------------------------------------|
-| `weight_init`            | str     | Weight initialization method                     | `kaiming_normal`, `xavier_uniform`, etc.   |
-| `grad_clip_norm`         | float   | Gradient clipping norm                           | 0.5 – 2.0 (or null to disable)             |
+| `weight_init`            | str     | Weight initialization scheme                     | `kaiming_normal`, `xavier_uniform`         |
+| `grad_clip_norm`         | float   | Max gradient norm (clipping)                     | 0.5 – 2.0                                  |
 | `accumulation_steps`     | int     | Gradient accumulation steps                      | 1 – 8                                      |
-| `use_amp`                | bool    | Use mixed precision (AMP)                        | `true` for speed on modern GPUs            |
-| `early_stop_patience`    | int     | Early stopping patience (epochs)                 | 10 – 30 (or null to disable)               |
+| `use_amp`                | bool    | Enable mixed precision                           | `true` on modern GPUs                      |
+| `early_stop_patience`    | int     | Stop if no validation improvement                | 10 – 25                                    |
 
 ### Curriculum Learning
 
-| Field                        | Type   | Description                              | Recommended                              |
-|------------------------------|--------|------------------------------------------|------------------------------------------|
-| `curriculum_learning.enabled`     | bool   | Enable curriculum                        | Usually `true`                           |
-| `curriculum_learning.start_resolution` | list | Starting resolution for curriculum     | `[64, 64]` or lower                      |
-| `curriculum_learning.ramp_epochs`     | int    | How many epochs to ramp resolution     | 30 – 60                                  |
+Highly recommended for most PDE problems.
+
+```json
+"curriculum_learning": {
+  "enabled": true,
+  "start_resolution": [64, 64],
+  "ramp_epochs": 40
+}
+```
 
 ### Uncertainty Quantification (UQ)
 
-| Field                        | Type   | Description                              | Recommended                              |
-|------------------------------|--------|------------------------------------------|------------------------------------------|
-| `uq_config.enabled`          | bool   | Enable UQ                                | `true` for most challenges               |
-| `uq_config.method`           | str    | UQ method                                | `deep_ensemble` (recommended)            |
-| `uq_config.num_members`      | int    | Number of ensemble members               | 3 – 5                                    |
-| `uq_config.calibration_target` | float | Target coverage for calibration        | 0.85 – 0.95                              |
+```json
+"uq_config": {
+  "enabled": true,
+  "method": "deep_ensemble",
+  "num_members": 4,
+  "calibration_target": 0.90
+}
+```
 
 ### Model-Specific Parameters
 
-Use `model_kwargs` to pass extra parameters to the backbone:
+Pass extra arguments to the backbone via `model_kwargs`:
 
 ```json
 "model_kwargs": {
@@ -84,17 +130,15 @@ Use `model_kwargs` to pass extra parameters to the backbone:
 
 ## Example Strategies
 
-### Basic Strategy (Good Starting Point)
+### Simple Strong Strategy (Start Here)
 
 ```json
 {
   "backbone": "fno",
   "optimizer": "AdamW",
-  "learning_rate": 0.001,
+  "learning_rate": 0.0008,
   "weight_decay": 1e-4,
   "scheduler": "CosineAnnealingLR",
-  "epochs": 100,
-  "batch_size": 8,
   "use_amp": true,
   "curriculum_learning": {
     "enabled": true,
@@ -104,21 +148,20 @@ Use `model_kwargs` to pass extra parameters to the backbone:
 }
 ```
 
-### Advanced Strategy (More Control)
+### Advanced / Experimental Strategy
 
 ```json
 {
   "backbone": "fno",
   "optimizer": "AdamW",
-  "learning_rate": 0.0008,
+  "learning_rate": 0.0007,
   "weight_decay": 1e-4,
   "weight_init": "kaiming_normal",
   "grad_clip_norm": 1.0,
   "accumulation_steps": 4,
   "use_amp": true,
-  "physics_loss_weight": 0.9,
-  "early_stop_patience": 20,
-  "scheduler": "CosineAnnealingLR",
+  "physics_loss_weight": 0.85,
+  "early_stop_patience": 18,
   "curriculum_learning": {
     "enabled": true,
     "start_resolution": [64, 64],
@@ -138,52 +181,29 @@ Use `model_kwargs` to pass extra parameters to the backbone:
 
 ---
 
-## Tips for Writing Good Strategies
+## Recommended Workflow
 
-1. **Start with the priors**
-   - Run `hydrogen-miner priors <challenge_id>` to get suggested loss weights and features.
+1. Run `hydrogen-miner priors <challenge>` to get symbolically recommended values.
+2. Copy the suggested `loss_vector` and curriculum settings into your strategy.
+3. Make small, intentional changes (e.g., slightly increase one loss term).
+4. Test locally with `hydrogen-miner validate`.
+5. Submit when you’re confident.
 
-2. **Use curriculum learning**
-   - Almost always helpful for PDE problems. Start at lower resolution and ramp up.
-
-3. **Don't over-tune early**
-   - The Landscape Agent will learn which combinations actually work. Start reasonable, then iterate based on results.
-
-4. **Pay attention to physics_loss_weight**
-   - Too low → model may violate physics.
-   - Too high → model may underfit the data.
-
-5. **Mixed precision (AMP) is usually worth it**
-   - Faster training with minimal accuracy loss on modern GPUs.
-
-6. **Gradient clipping helps stability**
-   - Especially useful for stiff PDEs (Navier-Stokes, Burgers).
+This workflow lets you leverage the collective causal knowledge discovered by the Landscape Agent.
 
 ---
 
 ## Common Pitfalls
 
-- Setting learning rate too high → unstable training or NaNs.
-- Disabling curriculum too early → poor convergence on fine resolution.
-- Ignoring UQ calibration → lower score even if error looks good.
-- Using very exotic optimizer settings without testing locally first.
-
----
-
-## Local Validation (Recommended)
-
-Before submitting (and paying the fee), test your strategy locally:
-
-```bash
-hydrogen-miner validate --challenge poisson_2d_v1 --strategy my_strategy.json
-```
-
-This runs a quick local evaluation so you can iterate without burning fees.
+- Ignoring the priors and guessing loss weights from scratch.
+- Setting learning rate too high → unstable training.
+- Turning off curriculum too aggressively.
+- Over-complicating the strategy early (start simple, then iterate).
 
 ---
 
 ## Philosophy
 
-The strategy is your **idea**. The more thoughtfully you design the training process (loss weighting, curriculum, regularization, optimization), the better your model will generalize under hidden stress.
+Hydrogen is designed to be **democratized**. You don’t need a PhD or a giant GPU cluster to compete effectively. By starting with the symbolically and causally recommended configurations and then making thoughtful adjustments, almost anyone can produce competitive strategies.
 
-The Landscape Agent exists to discover which ideas actually work across many miners. Your job is to propose good ones.
+The Landscape Agent exists to surface what actually works. Your job is to propose good ideas and let the system learn from them.
