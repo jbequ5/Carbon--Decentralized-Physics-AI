@@ -1,4 +1,4 @@
-"""Unified Trainer with validation support."""
+"""Unified Trainer with explicit train / val split support."""
 
 from typing import Dict, Any, Optional
 
@@ -54,7 +54,6 @@ def train_model(
         avg_train = total_loss / len(train_loader)
         history["train_loss"].append(avg_train)
 
-        # Validation loop
         if val_loader is not None:
             model.eval()
             val_loss = 0.0

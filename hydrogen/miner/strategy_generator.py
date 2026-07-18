@@ -1,48 +1,80 @@
-"""Strategy generator with multi-backbone support."""
+"""SOTA Strategy Generator for Hydrogen.
 
-from typing import Dict, Any
+Produces rich, validator-complete strategy JSONs.
+"""
+
+from typing import Dict, Any, Optional
 
 from hydrogen.challenges import load_challenge
 from hydrogen.backbones import list_backbones
 
 
-def generate_strategy(challenge_id: str = "poisson_2d_v1", backbone: str = None) -> Dict[str, Any]:
+def generate_strategy(
+    challenge_id: str = "poisson_2d_v1",
+    backbone: Optional[str] = None,
+    use_curriculum: bool = True,
+    use_uq: bool = True,
+) -> Dict[str, Any]:
+    """
+    Generates a rich, SOTA strategy JSON that the validator can fully consume.
+    """
     try:
         challenge = load_challenge(challenge_id)
-        symbolic = challenge.symbolic_metadata
-        suggested_weights = symbolic.get("suggested_loss_weights", {})
-
-        # Use provided backbone or fall back to challenge default
-        chosen_backbone = backbone or challenge.get_backbone()
-
+        symbolic = getattr(challenge, "symbolic_metadata", {})
+        suggested_weights = symbolic.get("suggested_loss_weights", {
+            "pde_residual": 1.0,
+            "boundary": 0.8,
+            "initial_condition": 0.6,
+        })
+        chosen_backbone = backbone or getattr(challenge, "get_backbone", lambda: "physicsnemo_fno")()
+        resolution = getattr(challenge, "resolution", [128, 128])
     except Exception:
-        suggested_weights = {"pde_residual": 1.0, "boundary": 0.8}
+        suggested_weights = {
+            "pde_residual": 1.0,
+            "boundary": 0.8,
+            "initial_condition": 0.6,
+        }
         chosen_backbone = backbone or "physicsnemo_fno"
+        resolution = [128, 128]
 
-    return {
+    strategy = {
         "backbone": chosen_backbone,
-        "resolution": list(getattr(challenge, "resolution", [128, 128])),
+        "resolution": list(resolution),
         "pino": {
             "loss_vector": suggested_weights,
             "physics_loss_type": "pde_residual",
             "boundary_handling": "ghost_cells",
+            "initial_condition_weight": suggested_weights.get("initial_condition", 0.6),
         },
         "optimizer": "AdamW",
-        "learning_rate": 0.001,
-        "epochs": 80,
+        "learning_rate": 0.0008,
+        "weight_decay": 1e-4,
+        "epochs": 100,
+        "batch_size": 8,
         "curriculum_learning": {
-            "enabled": True,
+            "enabled": use_curriculum,
             "start_resolution": [64, 64],
-            "end_resolution": list(getattr(challenge, "resolution", [128, 128])),
-            "ramp_epochs": 30,
+            "end_resolution": list(resolution),
+            "ramp_epochs": 35,
+            "difficulty_schedule": "linear",
         },
         "uq_config": {
+            "enabled": use_uq,
             "method": "deep_ensemble",
-            "num_members": 3,
-            "calibration_target": 0.90,
+            "num_members": 4,
+            "calibration_target": 0.92,
+            "dropout_rate": 0.05,
+        },
+        "data_split": {
+            "train": "benchmark_train",
+            "stress_holdout": "procedural_hidden",
+            "benchmark": "benchmark_test",
         },
         "auto_loss_weights": True,
+        "physics_gate_strictness": 0.9,
     }
+
+    return strategy
 
 
 def list_available_backbones():
