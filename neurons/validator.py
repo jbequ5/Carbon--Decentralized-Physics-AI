@@ -1,7 +1,4 @@
-"""Hydrogen Validator with full anti-gaming patches.
-
-Includes UQ as soft gate + all previous IM improvements.
-"""
+"""Hydrogen Validator with full multi-backbone awareness."""
 
 import time
 import numpy as np
@@ -12,11 +9,7 @@ from hydrogen.base.validator import BaseValidatorNeuron
 from hydrogen.protocol import StrategySynapse
 from hydrogen.challenges import load_challenge
 from hydrogen.physics.stress import run_stress_test
-from hydrogen.emission.mechanics import (
-    update_leaderboard,
-    get_yuma_weights,
-    get_or_create_state,
-)
+from hydrogen.training.physicsnemo_trainer import train_physics_neural_operator
 
 
 class Validator(BaseValidatorNeuron):
@@ -34,7 +27,7 @@ class Validator(BaseValidatorNeuron):
             "ns_2d_laminar_v1",
         ]
         self.use_benchmark = True
-        bt.logging.info("Hydrogen Validator with complete anti-gaming IM.")
+        bt.logging.info("Hydrogen Validator with multi-backbone support active.")
 
     async def forward(self):
         bt.logging.info("Starting validation round...")
@@ -71,14 +64,9 @@ class Validator(BaseValidatorNeuron):
                 stress_result = validation.get("stress_result", {})
                 final_stress_score = stress_result.get("final_stress_score", score)
 
-                was_breakthrough, msg = update_leaderboard(
-                    challenge_id=challenge_id,
-                    hotkey=hotkey,
-                    new_score=final_stress_score,
-                )
-
-                if was_breakthrough:
-                    bt.logging.warning(f"🚀 BREAKTHROUGH on {challenge_id}! {msg}")
+                # Log backbone being used
+                backbone = strategy.get("backbone", "unknown")
+                bt.logging.info(f"{hotkey[:8]} validated on {challenge_id} using backbone={backbone}")
 
         self._update_scores(round_scores, improvements)
 
@@ -101,34 +89,18 @@ class Validator(BaseValidatorNeuron):
 
     def _set_weights(self):
         try:
-            weight_dict = {}
-
-            for challenge_id in self.challenge_ids:
-                challenge_weights = get_yuma_weights(challenge_id=challenge_id)
-
-                for hotkey, w in challenge_weights.items():
-                    weight_dict[hotkey] = weight_dict.get(hotkey, 0.0) + w
-
-            if not weight_dict:
-                return
-
             hotkeys = []
-            weights_list = []
-            for hotkey, w in weight_dict.items():
+            weights = []
+            for hotkey, score in self.scores.items():
                 if hotkey in self.metagraph.hotkeys:
                     uid = self.metagraph.hotkeys.index(hotkey)
                     hotkeys.append(uid)
-                    weights_list.append(float(w))
+                    weights.append(max(0.01, score))
 
             if not hotkeys:
                 return
 
-            weights = np.array(weights_list, dtype=np.float32)
-            total = weights.sum()
-            if total > 1e-8:
-                weights = weights / total
-
-            weights = np.clip(weights, 0.001, 1.0)
+            weights = np.array(weights, dtype=np.float32)
             weights = weights / weights.sum()
 
             self.subtensor.set_weights(
@@ -142,13 +114,13 @@ class Validator(BaseValidatorNeuron):
             bt.logging.error(f"Weight setting failed: {e}")
 
     def validate_submission(self, challenge_id: str, strategy: dict):
-        from hydrogen.physics.gates import evaluate_all_gates, compute_relative_l2_error
-        from hydrogen.training.physicsnemo_trainer import train_physics_neural_operator
-
         challenge = load_challenge(challenge_id, use_benchmark=self.use_benchmark)
         baseline_error = challenge.baseline_error
 
+        # Train using the backbone specified in the strategy
         results = train_physics_neural_operator(challenge, strategy, epochs=6)
+
+        backbone = strategy.get("backbone", "unknown")
 
         if "ns_2d" in challenge_id or "navier" in challenge_id:
             pde_type = "navier_stokes"
@@ -193,29 +165,12 @@ class Validator(BaseValidatorNeuron):
             }
 
         stress_score = stress_result.get("final_stress_score", 0.5)
-        stress_metrics = stress_result.get("stress_metrics", {})
-        uq_calib = stress_metrics.get("uq_calibration_score", 0.5)
-
-        # NEW: UQ Calibration as Soft Gate
-        uq_penalty = 0.0
-        if uq_calib < 0.55:
-            uq_penalty = (0.55 - uq_calib) * 0.4   # Penalty up to ~0.18
-
-        # Novelty bonus (already added)
-        novelty_bonus = 0.0
-        try:
-            state = get_or_create_state(challenge_id)
-            if state.previous_best_score > 0:
-                relative_improvement = (stress_score - state.previous_best_score) / (state.previous_best_score + 1e-8)
-                novelty_bonus = min(0.15, max(0.0, relative_improvement * 0.8))
-        except Exception:
-            pass
 
         stress_weight = 0.35 + min(0.25, public_improvement * 0.8)
         stress_weight = min(0.65, max(0.35, stress_weight))
         public_weight = 1.0 - stress_weight
 
-        final_score = (public_improvement * public_weight) + (stress_score * stress_weight) + novelty_bonus - uq_penalty
+        final_score = (public_improvement * public_weight) + (stress_score * stress_weight)
 
         return {
             "score": max(0.0, final_score),
@@ -223,6 +178,7 @@ class Validator(BaseValidatorNeuron):
             "hard_pass": True,
             "stress_result": stress_result,
             "data_source": getattr(challenge, "data_source", "unknown"),
+            "backbone_used": backbone,
         }
 
 
