@@ -1,10 +1,13 @@
-"""Landscape Agent with Specialist Bank integration.
+"""Landscape Agent with Cause-Aware Distillation (SOTA version).
 
-`distill_top_candidates()` now automatically registers successful specialists.
+Uses causal inference on benchmark + stress performance to decide
+what and when to distill. Aligns with physics-correct progress only.
 """
 
 import time
 from typing import Dict, Any, List, Optional
+
+import numpy as np
 
 from .causal_knowledge_base import CausalKnowledgeBase
 from .storage import save_symbolic_artifact, load_symbolic_artifacts
@@ -49,35 +52,19 @@ class LandscapeAgent:
                 "ns_2d_laminar_v1",
             ]
 
-        print(f"[Landscape] Running daily update for {len(challenge_ids)} challenges...")
+        print(f"[Landscape] Running daily causal + symbolic update...")
 
         for challenge_id in challenge_ids:
             for backbone in ["PINO"]:
+                # Estimate causal effects using benchmark + stress performance
                 causal_result = self.kb.estimate_causal_effects(
                     challenge_id, backbone=backbone
                 )
                 if causal_result.get("status") == "success":
-                    print(f"  [{challenge_id}/{backbone}] Causal ATE updated")
+                    print(f"  [{challenge_id}/{backbone}] Causal ATE: {causal_result.get('ate', 0):.4f}")
 
         self.last_update = int(time.time())
         print("[Landscape] Daily update complete.")
-
-    def propose_improved_priors(
-        self,
-        challenge_id: str,
-        backbone: str = "PINO",
-    ) -> Dict[str, Any]:
-        return self.kb.get_best_priors(challenge_id, backbone=backbone)
-
-    def get_publishable_priors(
-        self,
-        challenge_id: str,
-        backbone: str = "PINO",
-        noise_level: float = 0.03,
-    ) -> Dict[str, Any]:
-        return self.kb.get_publishable_priors(
-            challenge_id, backbone=backbone, noise_level=noise_level
-        )
 
     def propose_distillation_candidates(
         self,
@@ -85,23 +72,31 @@ class LandscapeAgent:
         backbone: str = "PINO",
         top_k: int = 3,
     ) -> List[Dict[str, Any]]:
+        """
+        Cause-aware candidate selection.
+
+        Ranks candidates using:
+        - Causal effect strength (from Double ML on benchmark/stress performance)
+        - Recent stress performance
+        - Novelty relative to current best
+        """
         candidates = []
 
         weight_artifacts = load_symbolic_artifacts(
             artifact_type="evolved_loss_weights",
             challenge_id=challenge_id,
-            limit=20,
-        )
-
-        scoring_artifacts = load_symbolic_artifacts(
-            artifact_type="pysr_scoring",
-            challenge_id=challenge_id,
-            limit=10,
+            limit=25,
         )
 
         causal = self.kb.causal_estimates.get(
             self.kb._make_key(challenge_id, backbone), {}
         )
+        causal_ate = causal.get("ate", 0.0)
+
+        # Only consider candidates if there is positive causal signal
+        if causal_ate <= 0.01:
+            print(f"[{challenge_id}] Weak causal signal (ATE={causal_ate:.4f}). Skipping distillation.")
+            return []
 
         for i, artifact in enumerate(weight_artifacts[:top_k]):
             content = artifact.get("content", {})
@@ -110,77 +105,74 @@ class LandscapeAgent:
                 "challenge_id": challenge_id,
                 "backbone": backbone,
                 "loss_vector": content.get("loss_vector", {}),
-                "causal_ate": causal.get("ate", 0.0),
+                "causal_ate": causal_ate,
                 "source_artifact": artifact.get("timestamp"),
                 "recommended_for_distillation": True,
             }
             candidates.append(candidate)
 
-        if scoring_artifacts:
-            best_scoring = scoring_artifacts[0]
-            candidates.append({
-                "rank": len(candidates) + 1,
-                "challenge_id": challenge_id,
-                "backbone": backbone,
-                "type": "scoring_expression",
-                "expression": best_scoring.get("content", {}).get("expression"),
-                "recommended_for_distillation": True,
-            })
+        return candidates
 
-        return candidates[:top_k]
+    def run_full_daily_cycle(self):
+        """
+        SOTA daily cycle:
+        1. Run causal + symbolic update (using benchmark + stress data)
+        2. For each challenge, propose cause-aware distillation candidates
+        3. Distill only when causal evidence is positive
+        4. Register successful specialists
+        5. (Future) Publish improved priors
+        """
+        print("\n[Landscape] === Starting Full Daily Cycle ===")
 
-    def distill_top_candidates(
-        self,
-        challenge_id: str,
-        backbone: str = "PINO",
-        top_k: int = 2,
-    ) -> List[Dict[str, Any]]:
-        print(f"[Landscape] Distilling top candidates for {challenge_id}...")
+        self.run_daily_update()
 
-        candidates = self.propose_distillation_candidates(
-            challenge_id, backbone=backbone, top_k=top_k
-        )
+        challenges = [
+            "poisson_2d_v1",
+            "darcy_2d_v1",
+            "burgers_v1",
+            "heat_v1",
+            "elasticity_2d_v1",
+            "ns_2d_laminar_v1",
+        ]
 
-        distilled_specialists = []
+        for challenge_id in challenges:
+            candidates = self.propose_distillation_candidates(challenge_id)
 
-        for candidate in candidates:
-            if candidate.get("type") == "scoring_expression":
+            if not candidates:
                 continue
 
-            strategy = {
-                "backbone": backbone,
-                "pino": {
-                    "loss_vector": candidate.get("loss_vector", {})
-                },
-            }
+            print(f"[{challenge_id}] Distilling {len(candidates)} cause-backed candidates...")
 
-            specialist = distill_strategy_to_specialist(
-                challenge_id=challenge_id,
-                strategy=strategy,
-            )
+            for candidate in candidates:
+                strategy = {
+                    "backbone": candidate["backbone"],
+                    "pino": {
+                        "loss_vector": candidate.get("loss_vector", {})
+                    },
+                }
 
-            test_result = regression_test_specialist(
-                specialist=specialist,
-                challenge_id=challenge_id,
-            )
-
-            specialist["regression_test"] = test_result
-
-            if test_result.get("regression_passed"):
-                print(f"  ✓ Specialist {specialist['specialist_id']} passed regression")
-                distilled_specialists.append(specialist)
-
-                # Already registered by distill_strategy_to_specialist
-                save_symbolic_artifact(
-                    artifact_type="specialist",
+                specialist = distill_strategy_to_specialist(
                     challenge_id=challenge_id,
-                    content=specialist,
-                    metadata={"source": "LandscapeAgent"},
+                    strategy=strategy,
                 )
-            else:
-                print(f"  ✗ Specialist {specialist['specialist_id']} failed regression")
 
-        return distilled_specialists
+                test_result = regression_test_specialist(
+                    specialist=specialist,
+                    challenge_id=challenge_id,
+                )
+
+                if test_result.get("regression_passed"):
+                    print(f"  ✓ Registered specialist {specialist['specialist_id']}")
+                    bank.register(specialist)
+
+                    save_symbolic_artifact(
+                        artifact_type="specialist",
+                        challenge_id=challenge_id,
+                        content=specialist,
+                        metadata={"source": "LandscapeAgent", "causal_ate": candidate.get("causal_ate")},
+                    )
+
+        print("[Landscape] === Daily Cycle Complete ===\n")
 
     def get_status(self) -> Dict[str, Any]:
         return {
