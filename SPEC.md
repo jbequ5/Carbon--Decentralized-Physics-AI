@@ -32,7 +32,7 @@ Inspired by Minos-style round-only winner logic:
 - Tracks the best combined score **per challenge**.
 - Uses **exponential decay** on old performance.
 - Only miners who set a new best combined score on a challenge contribute strongly to weights.
-- Includes **participation dust** for recent miners who do not win.
+- Includes **participation dust** for recent miners.
 - Produces a **winner-heavy + dust** weight distribution for `set_weights()`.
 
 ### 3. Validator
@@ -54,6 +54,25 @@ Inspired by Minos-style round-only winner logic:
 Currently uses **standard Yuma Consensus** miner emissions via `set_weights()`.
 
 A more advanced hybrid emissions model (Breakthrough Bounties + Decaying Stipends + treasury rollover) is planned but **not active** at this time.
+
+## Validator-Private Components
+
+To maintain strong anti-gaming properties, the following should remain **validator-private** (not directly accessible to miners or agents):
+
+- Hidden stress test conditions and evaluation data
+- Exact physics gate implementations and thresholds
+- Full combined scoring logic and internal weight calculations
+- `ChallengeWinnerTracker` internal state and leader tracking logic
+- Raw per-miner evaluation traces and detailed physics violation data
+- Landscape Agent raw data and learned model (only noisy/aggregated outputs should be exposed)
+
+Miners and agents are expected to operate with **partial information**. This asymmetry is intentional and is one of Hydrogen’s core anti-gaming mechanisms.
+
+Publicly exposed information should be limited to:
+- Challenge descriptions
+- High-level scoring objectives (Physics, Robustness, Accuracy)
+- Miners’ own scores and metrics
+- Noisy or aggregated priors / leader information
 
 ## Key Components
 
