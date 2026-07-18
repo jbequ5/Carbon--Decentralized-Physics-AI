@@ -1,4 +1,4 @@
-"""Extremely modular trainer - every reasonable knob exposed via strategy."""
+"""Deterministic-aware modular trainer."""
 
 from typing import Dict, Any, Optional
 
@@ -8,25 +8,46 @@ import torch.nn as nn
 from hydrogen.backbones import get_backbone
 
 
+def set_deterministic_mode(seed: int):
+    """
+    Enable deterministic mode for reproducibility across runs and GPUs.
+
+    Note: This can reduce performance. Some operations may still be
+    non-deterministic or raise errors if they cannot be made deterministic.
+    """
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    # cuDNN settings
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    # Enable PyTorch's deterministic algorithms (PyTorch >= 1.8)
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception:
+        pass  # Older PyTorch versions
+
+
 def get_model(
     backbone: str = "physicsnemo_fno",
     in_channels: int = 3,
     out_channels: int = 1,
     strategy: dict = None,
+    seed: int = 42,
     **kwargs,
 ) -> nn.Module:
     if strategy is None:
         strategy = {}
 
-    BackboneClass = get_backbone(backbone)
+    set_deterministic_mode(seed)
 
-    # Allow extra model kwargs from strategy
+    BackboneClass = get_backbone(backbone)
     model_kwargs = strategy.get("model_kwargs", {})
     model_kwargs.update(kwargs)
 
     model = BackboneClass(in_channels=in_channels, out_channels=out_channels, **model_kwargs)
 
-    # Weight initialization
     init_type = strategy.get("weight_init", "default").lower()
     if init_type != "default":
         _initialize_weights(model, init_type)
@@ -95,6 +116,10 @@ def train_model(
     if strategy is None:
         strategy = {}
 
+    # Derive a deterministic seed
+    seed = strategy.get("seed", 42)
+    set_deterministic_mode(seed)
+
     model = model.to(device)
     optimizer = get_optimizer(model, strategy)
     scheduler = get_scheduler(optimizer, strategy, epochs)
@@ -108,7 +133,6 @@ def train_model(
     best_val_loss = float("inf")
     epochs_no_improve = 0
 
-    # Physics loss scaling from strategy
     physics_weight = strategy.get("physics_loss_weight", physics_loss_weight)
 
     history = {"train_loss": [], "val_loss": []}
