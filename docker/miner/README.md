@@ -1,52 +1,41 @@
-# Hydrogen Miner Docker Environment
+# Hydrogen Miner Docker Environment (Agent Optimized)
 
-This provides a clean, intelligent way to run both example and custom agentic miners.
+This environment is designed to be highly usable for both humans and autonomous agents.
 
-## Quick Start
-
-```bash
-# Copy example config
-cp docker/miner/.env.example .env
-
-# Edit .env with your details
-nano .env
-
-# Run (defaults to multi-challenge mode)
-docker compose up miner
-```
-
-## Focused Mode (Recommended for Most Users)
-
-You can focus on **one specific challenge** by setting `CHALLENGE_ID`:
+## Quick Start (Focused Mode - Recommended)
 
 ```bash
 CHALLENGE_ID=poisson_2d_v1 docker compose up miner
 ```
 
-In focused mode the container will:
-- Load challenge-specific priors from the Landscape
-- Run an internal testing/iteration loop
-- Only submit when the estimated score looks good
+This will:
+- Load priors for the chosen challenge
+- Run an internal testing loop
+- Submit only when the estimated score looks good
 
-This is the recommended way to work on one challenge deeply.
+## Environment Variables (Control Behavior)
 
-## Multi-Challenge Mode
+| Variable            | Default     | Description |
+|---------------------|-------------|-------------|
+| `CHALLENGE_ID`      | (none)      | Focus on one specific challenge (highly recommended) |
+| `DRY_RUN`           | false       | If true, never actually submit (great for testing) |
+| `ITERATIONS`        | 6           | Max number of propose/validate iterations |
+| `SUBMIT_THRESHOLD`  | 0.07        | Only submit if estimated score is at or above this |
+| `HYDROGEN_HOTKEY`   | (required)  | Your Bittensor hotkey |
+| `HYDROGEN_WALLET`   | default     | Your wallet name |
+| `HYDROGEN_API_KEY`  | (optional)  | API key if using MCP server with auth |
 
-If you don't set `CHALLENGE_ID`, it runs the built-in example that iterates over all active challenges.
+## Examples
 
 ```bash
-docker compose up miner
-```
+# Focused run on one challenge
+CHALLENGE_ID=darcy_2d_v1 docker compose up miner
 
-## Configuration
+# Dry run (test without submitting)
+CHALLENGE_ID=burgers_v1 DRY_RUN=true docker compose up miner
 
-Set these in your `.env` file or as environment variables:
-
-```bash
-HYDROGEN_HOTKEY=5F...          # Your hotkey
-HYDROGEN_WALLET=default        # Wallet name
-HYDROGEN_API_KEY=secret        # Optional (for MCP server)
-CHALLENGE_ID=poisson_2d_v1     # Optional: focus on one challenge
+# More aggressive iteration
+CHALLENGE_ID=poisson_2d_v1 ITERATIONS=12 SUBMIT_THRESHOLD=0.08 docker compose up miner
 ```
 
 ## Running Custom Agents
@@ -55,14 +44,9 @@ CHALLENGE_ID=poisson_2d_v1     # Optional: focus on one challenge
 docker compose run miner python my_custom_agent.py
 ```
 
-Or mount a local file:
+## Tips for Agents
 
-```bash
-docker run -v $(pwd)/my_agent.py:/app/my_agent.py hydrogen-miner python my_agent.py
-```
-
-## Tips
-
-- Always start from priors when possible (`get_priors`)
-- Use local validation aggressively before submitting
-- See `STRATEGY.md` for strategy writing guidance
+- Always start from priors when possible
+- Use `DRY_RUN=true` while developing your agent logic
+- Tune `ITERATIONS` and `SUBMIT_THRESHOLD` based on how aggressive you want to be
+- Check your recent results after runs to improve future strategies
