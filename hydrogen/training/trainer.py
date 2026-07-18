@@ -1,4 +1,4 @@
-"""Highly modular trainer supporting many strategy-controlled options."""
+"""Extremely modular trainer - every reasonable knob exposed via strategy."""
 
 from typing import Dict, Any, Optional
 
@@ -12,10 +12,43 @@ def get_model(
     backbone: str = "physicsnemo_fno",
     in_channels: int = 3,
     out_channels: int = 1,
+    strategy: dict = None,
     **kwargs,
 ) -> nn.Module:
+    if strategy is None:
+        strategy = {}
+
     BackboneClass = get_backbone(backbone)
-    return BackboneClass(in_channels=in_channels, out_channels=out_channels, **kwargs)
+
+    # Allow extra model kwargs from strategy
+    model_kwargs = strategy.get("model_kwargs", {})
+    model_kwargs.update(kwargs)
+
+    model = BackboneClass(in_channels=in_channels, out_channels=out_channels, **model_kwargs)
+
+    # Weight initialization
+    init_type = strategy.get("weight_init", "default").lower()
+    if init_type != "default":
+        _initialize_weights(model, init_type)
+
+    return model
+
+
+def _initialize_weights(model: nn.Module, init_type: str):
+    for m in model.modules():
+        if isinstance(m, (nn.Conv2d, nn.Linear)):
+            if init_type == "kaiming_normal":
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif init_type == "kaiming_uniform":
+                nn.init.kaiming_uniform_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif init_type == "xavier_normal":
+                nn.init.xavier_normal_(m.weight)
+            elif init_type == "xavier_uniform":
+                nn.init.xavier_uniform_(m.weight)
+            elif init_type == "normal":
+                nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
 
 
 def get_optimizer(model: nn.Module, strategy: dict):
@@ -57,6 +90,7 @@ def train_model(
     epochs: int = 50,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     physics_loss_fn: Optional[callable] = None,
+    physics_loss_weight: float = 1.0,
 ) -> Dict[str, Any]:
     if strategy is None:
         strategy = {}
@@ -65,20 +99,17 @@ def train_model(
     optimizer = get_optimizer(model, strategy)
     scheduler = get_scheduler(optimizer, strategy, epochs)
 
-    # Gradient clipping
     grad_clip_norm = strategy.get("grad_clip_norm", None)
-
-    # Gradient accumulation
     accumulation_steps = strategy.get("accumulation_steps", 1)
-
-    # Mixed precision
     use_amp = strategy.get("use_amp", False) and device.startswith("cuda")
     scaler = torch.cuda.amp.GradScaler() if use_amp else None
 
-    # Early stopping (basic)
     early_stop_patience = strategy.get("early_stop_patience", None)
     best_val_loss = float("inf")
     epochs_no_improve = 0
+
+    # Physics loss scaling from strategy
+    physics_weight = strategy.get("physics_loss_weight", physics_loss_weight)
 
     history = {"train_loss": [], "val_loss": []}
 
@@ -93,18 +124,17 @@ def train_model(
             if use_amp:
                 with torch.cuda.amp.autocast():
                     pred = model(x)
-                    loss = torch.nn.functional.mse_loss(pred, y)
-                    if physics_loss_fn is not None:
-                        loss = loss + physics_loss_fn(pred, x)
+                    data_loss = torch.nn.functional.mse_loss(pred, y)
+                    physics_loss = physics_loss_fn(pred, x) if physics_loss_fn else 0.0
+                    loss = data_loss + physics_weight * physics_loss
                 scaler.scale(loss).backward()
             else:
                 pred = model(x)
-                loss = torch.nn.functional.mse_loss(pred, y)
-                if physics_loss_fn is not None:
-                    loss = loss + physics_loss_fn(pred, x)
+                data_loss = torch.nn.functional.mse_loss(pred, y)
+                physics_loss = physics_loss_fn(pred, x) if physics_loss_fn else 0.0
+                loss = data_loss + physics_weight * physics_loss
                 loss.backward()
 
-            # Gradient accumulation
             if (i + 1) % accumulation_steps == 0:
                 if grad_clip_norm:
                     if use_amp:
@@ -124,7 +154,6 @@ def train_model(
         avg_train = total_loss / len(train_loader)
         history["train_loss"].append(avg_train)
 
-        # Validation
         current_val_loss = None
         if val_loader is not None:
             model.eval()
@@ -143,13 +172,11 @@ def train_model(
             if (epoch + 1) % 10 == 0:
                 print(f"Epoch {epoch+1}/{epochs} - Train Loss: {avg_train:.6f}")
 
-        # Scheduler step
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) and current_val_loss is not None:
             scheduler.step(current_val_loss)
         else:
             scheduler.step()
 
-        # Early stopping
         if early_stop_patience and current_val_loss is not None:
             if current_val_loss < best_val_loss - 1e-6:
                 best_val_loss = current_val_loss
