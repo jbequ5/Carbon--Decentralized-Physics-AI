@@ -26,6 +26,7 @@ services:
       - HYDROGEN_API_KEY=${HYDROGEN_API_KEY:-}
       - CHALLENGE_ID=${CHALLENGE_ID:-}
       - DRY_RUN=${DRY_RUN:-false}
-      - ITERATIONS=${ITERATIONS:-6}
-      - SUBMIT_THRESHOLD=${SUBMIT_THRESHOLD:-0.07}
+      - ITERATIONS=${ITERATIONS:-8}
+      - SUBMIT_THRESHOLD=${SUBMIT_THRESHOLD:-0.075}
+      - VERBOSE=${VERBOSE:-true}
     command: python examples/run_agentic_miner.py
