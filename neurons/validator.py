@@ -1,6 +1,6 @@
-"""Hydrogen Validator with full emission weight application.
+"""Hydrogen Validator with robust 75/25 emission weight logic.
 
-Now properly applies the 75/25 emission logic on-chain via set_weights().
+Includes better edge-case handling and clear logging for Top-2 stipend.
 """
 
 import time
@@ -34,7 +34,7 @@ class Validator(BaseValidatorNeuron):
             "ns_2d_laminar_v1",
         ]
         self.use_benchmark = True
-        bt.logging.info("Hydrogen Validator with on-chain emission weight logic active.")
+        bt.logging.info("Hydrogen Validator with robust Top-2 stipend logic.")
 
     async def forward(self):
         bt.logging.info("Starting validation round...")
@@ -101,42 +101,65 @@ class Validator(BaseValidatorNeuron):
 
     def _set_weights(self):
         """
-        Applies the decaying Top-2 stipend weights on-chain.
+        Applies the decaying Top-2 stipend on-chain with good robustness and logging.
         """
         try:
-            weight_dict = {}  # hotkey -> total weight
+            weight_dict = {}
 
-            # Aggregate Top-2 stipend weights across all challenges
+            bt.logging.info("=== Top-2 Stipend Weight Calculation ===")
+
             for challenge_id in self.challenge_ids:
+                state = get_or_create_state(challenge_id)
+
+                # Log current leaders for visibility
+                leader = state.leader_hotkey[:8] if state.leader_hotkey else "None"
+                second = state.second_hotkey[:8] if state.second_hotkey else "None"
+                bt.logging.info(
+                    f"{challenge_id}: #1={leader}, #2={second}, "
+                    f"best_score={state.current_best_score:.4f}, "
+                    f"epochs_no_improve={state.epochs_without_improvement}"
+                )
+
                 challenge_weights = get_yuma_weights(
                     challenge_id=challenge_id,
-                    total_stipend_pool=1.0,   # normalized later
+                    total_stipend_pool=1.0,
                 )
 
                 for hotkey, w in challenge_weights.items():
-                    if hotkey in weight_dict:
-                        weight_dict[hotkey] += w
-                    else:
-                        weight_dict[hotkey] = w
+                    weight_dict[hotkey] = weight_dict.get(hotkey, 0.0) + w
 
             if not weight_dict:
-                bt.logging.warning("No Top-2 weights to set this epoch.")
+                bt.logging.warning("No Top-2 leaders found. Skipping weight set.")
                 return
 
-            # Convert to uids and weights
+            # Build uids and weights
             hotkeys = []
-            weights = []
+            weights_list = []
             for hotkey, w in weight_dict.items():
                 if hotkey in self.metagraph.hotkeys:
                     uid = self.metagraph.hotkeys.index(hotkey)
                     hotkeys.append(uid)
-                    weights.append(float(w))
+                    weights_list.append(float(w))
 
             if not hotkeys:
+                bt.logging.warning("No valid hotkeys in Top-2. Skipping weight set.")
                 return
 
-            weights = np.array(weights, dtype=np.float32)
-            weights = weights / weights.sum() if weights.sum() > 0 else weights
+            weights = np.array(weights_list, dtype=np.float32)
+
+            # Normalize
+            total_weight = weights.sum()
+            if total_weight > 1e-8:
+                weights = weights / total_weight
+            else:
+                bt.logging.warning("Total weight too small. Skipping weight set.")
+                return
+
+            # Final safety cap
+            weights = np.clip(weights, 0.001, 1.0)
+            weights = weights / weights.sum()
+
+            bt.logging.info(f"Setting weights for {len(hotkeys)} miners (Top-2 stipend).")
 
             result = self.subtensor.set_weights(
                 wallet=self.wallet,
@@ -144,7 +167,6 @@ class Validator(BaseValidatorNeuron):
                 uids=hotkeys,
                 weights=weights,
             )
-            bt.logging.info(f"Weights set for {len(hotkeys)} miners (Top-2 stipend).")
 
         except Exception as e:
             bt.logging.error(f"Weight setting failed: {e}")
