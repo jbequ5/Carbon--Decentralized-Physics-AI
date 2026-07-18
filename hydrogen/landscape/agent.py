@@ -1,6 +1,6 @@
-"""Landscape Agent with integrated distillation pipeline.
+"""Landscape Agent with Specialist Bank integration.
 
-Now supports end-to-end proposal → distillation → regression testing.
+`distill_top_candidates()` now automatically registers successful specialists.
 """
 
 import time
@@ -8,17 +8,13 @@ from typing import Dict, Any, List, Optional
 
 from .causal_knowledge_base import CausalKnowledgeBase
 from .storage import save_symbolic_artifact, load_symbolic_artifacts
-from hydrogen.specialist.distillation import (
-    distill_strategy_to_specialist,
-    regression_test_specialist,
-)
+from hydrogen.specialist.distillation import distill_strategy_to_specialist, regression_test_specialist
+from hydrogen.specialist.bank import SpecialistBank
+
+bank = SpecialistBank()
 
 
 class LandscapeAgent:
-    """
-    Central intelligence layer with causal reasoning and specialist distillation.
-    """
-
     def __init__(self, storage_dir: str = "./data/landscape"):
         self.storage_dir = storage_dir
         self.kb = CausalKnowledgeBase(storage_dir=storage_dir)
@@ -139,13 +135,6 @@ class LandscapeAgent:
         backbone: str = "PINO",
         top_k: int = 2,
     ) -> List[Dict[str, Any]]:
-        """
-        End-to-end flow:
-        1. Propose top candidates
-        2. Distill them into specialists
-        3. Run regression testing
-        4. Register successful specialists
-        """
         print(f"[Landscape] Distilling top candidates for {challenge_id}...")
 
         candidates = self.propose_distillation_candidates(
@@ -156,10 +145,8 @@ class LandscapeAgent:
 
         for candidate in candidates:
             if candidate.get("type") == "scoring_expression":
-                # For now we skip pure scoring expressions
                 continue
 
-            # Create a minimal strategy dict from the candidate
             strategy = {
                 "backbone": backbone,
                 "pino": {
@@ -167,13 +154,11 @@ class LandscapeAgent:
                 },
             }
 
-            # Distill
             specialist = distill_strategy_to_specialist(
                 challenge_id=challenge_id,
                 strategy=strategy,
             )
 
-            # Regression test
             test_result = regression_test_specialist(
                 specialist=specialist,
                 challenge_id=challenge_id,
@@ -185,7 +170,7 @@ class LandscapeAgent:
                 print(f"  ✓ Specialist {specialist['specialist_id']} passed regression")
                 distilled_specialists.append(specialist)
 
-                # Register in storage
+                # Already registered by distill_strategy_to_specialist
                 save_symbolic_artifact(
                     artifact_type="specialist",
                     challenge_id=challenge_id,

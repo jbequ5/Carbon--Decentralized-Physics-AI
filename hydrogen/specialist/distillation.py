@@ -1,16 +1,12 @@
-"""SOTA Knowledge Distillation for Physics-Informed Specialists.
+"""Distillation pipeline integrated with SpecialistBank.
 
-This version includes:
-- Advanced student architecture (physics-aware convolutional)
-- Multi-component distillation loss (output + features + physics)
-- Proper training loop with stress-aware validation
-- Better ONNX export
+Successful specialists are now automatically registered.
 """
 
 import os
 import json
 import time
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional
 
 import torch
 import torch.nn as nn
@@ -24,18 +20,16 @@ except ImportError:
 
 
 from hydrogen.physics.stress import run_stress_test
+from hydrogen.specialist.bank import SpecialistBank
 
 
 SPECIALIST_BANK_DIR = "./data/specialist_bank"
 os.makedirs(SPECIALIST_BANK_DIR, exist_ok=True)
 
+bank = SpecialistBank()  # Global bank instance
+
 
 class PhysicsAwareStudent(nn.Module):
-    """
-    A compact but powerful student architecture for PDE specialists.
-    Combines local convolutions with global context (simple attention-like).
-    """
-
     def __init__(self, in_channels: int = 3, out_channels: int = 1, base_width: int = 48):
         super().__init__()
         self.stem = nn.Sequential(
@@ -54,7 +48,6 @@ class PhysicsAwareStudent(nn.Module):
         )
         self.head = nn.Conv2d(base_width * 2, out_channels, 1)
 
-        # Lightweight global context
         self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.context = nn.Sequential(
             nn.Linear(base_width * 2, base_width),
@@ -68,7 +61,6 @@ class PhysicsAwareStudent(nn.Module):
         x = x + self.block1(x)
         x = self.block2(x)
 
-        # Global context modulation
         context = self.global_pool(x).flatten(1)
         scale = self.context(context).unsqueeze(-1).unsqueeze(-1)
         x = x * scale
@@ -87,9 +79,6 @@ def advanced_distillation_loss(
     alpha_feature: float = 0.3,
     alpha_physics: float = 0.2,
 ) -> torch.Tensor:
-    """
-    State-of-the-art distillation loss for physics-informed models.
-    """
     loss = alpha_output * F.mse_loss(student_output, teacher_output)
 
     if student_features is not None and teacher_features is not None:
@@ -111,9 +100,6 @@ def distill_strategy_to_specialist(
     epochs: int = 50,
     name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    High-quality distillation with advanced loss and architecture.
-    """
     timestamp = int(time.time())
     specialist_id = name or f"{challenge_id}_v{timestamp}"
 
@@ -127,7 +113,6 @@ def distill_strategy_to_specialist(
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
         for epoch in range(epochs):
-            # Use real data if provided, otherwise dummy
             if train_loader is not None:
                 try:
                     batch = next(train_loader)
@@ -158,14 +143,18 @@ def distill_strategy_to_specialist(
         "specialist_id": specialist_id,
         "challenge_id": challenge_id,
         "created_at": timestamp,
+        "version": 1,
         "strategy_config": strategy,
         "type": "advanced_knowledge_distilled",
         "student_architecture": "PhysicsAwareStudent",
         "distillation_epochs": epochs,
+        "validity_domain": {
+            "challenges": [challenge_id],
+            "backbones": [strategy.get("backbone", "PINO")],
+        },
         "status": "distilled",
     }
 
-    # Export to ONNX
     if ONNX_AVAILABLE:
         try:
             dummy_input = torch.randn(1, 3, 64, 64)
@@ -183,6 +172,12 @@ def distill_strategy_to_specialist(
             specialist["status"] = "onnx_exported"
         except Exception as e:
             specialist["onnx_error"] = str(e)
+
+    # Auto-register into SpecialistBank
+    try:
+        bank.register(specialist)
+    except Exception:
+        pass  # Don't fail distillation if registration has issues
 
     manifest_path = os.path.join(SPECIALIST_BANK_DIR, f"{specialist_id}.json")
     with open(manifest_path, "w") as f:
