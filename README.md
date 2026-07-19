@@ -1,8 +1,8 @@
 # Hydrogen
 
-**Decentralized Agentic Engine for Robust Physics-Informed Neural Operator Surrogates**
+**Decentralized Physical Intelligence through Robust Physics-Informed Neural Operator Trained Surrogates**
 
-Hydrogen builds a decentralized, agentic system on Bittensor where miners and agents collaboratively discover fast, physics-respecting training strategies for high-fidelity engineering surrogates. It combines an **MCP-powered participation layer with built-in testing loops**, a **rigorous hidden validation mechanism**, and a **Landscape Agent that compounds symbolic and causal knowledge** to create accelerating, trustworthy discovery.
+Hydrogen builds a decentralized, incentive system on Bittensor where miners and agents collaboratively discover fast, physics-respecting training strategies for high-fidelity engineering surrogates. It combines an **MCP-powered participation layer with built-in testing loops**, a **rigorous hidden validation mechanism**, and a **Landscape Agent that compounds symbolic and causal knowledge** to create accelerating, trustworthy discovery.
 
 ---
 
