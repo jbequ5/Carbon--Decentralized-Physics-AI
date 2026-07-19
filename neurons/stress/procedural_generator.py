@@ -1,21 +1,14 @@
 # neurons/stress/procedural_generator.py
 
 """
-Procedural Stress Generator for Hydrogen - Full Phase 0 Coverage.
+Procedural Stress Generator for Hydrogen - Full Phase 0 Coverage (Deep).
 
-Supports all current problem types:
-- Elliptic (Poisson, Darcy)
-- Hyperbolic (Burgers)
-- Parabolic (Heat)
-- Incompressible Flow (Navier-Stokes laminar)
-- Elasticity
-- Thermo-elasticity (Multi-physics)
-
+All physics classes now have deep, nuanced implementations comparable to Burgers.
 Follows docs/STRESS_TEST_DESIGN.md
 """
 
 import random
-from typing import List, Dict, Any
+from typing import List
 
 from .base_generator import BaseStressGenerator, stress_registry
 from .stress_models import StressVariant, StressSource
@@ -27,14 +20,7 @@ class ProceduralStressGenerator(BaseStressGenerator):
     Deep implementations for all Phase 0 problem types.
     """
 
-    def generate(
-        self,
-        challenge_id: str,
-        physics_class: str,
-        seed: int,
-        difficulty: float = 0.5
-    ) -> List[StressVariant]:
-
+    def generate(self, challenge_id: str, physics_class: str, seed: int, difficulty: float = 0.5):
         rng = random.Random(seed)
         variants = []
 
@@ -59,24 +45,26 @@ class ProceduralStressGenerator(BaseStressGenerator):
         return variants
 
     # ============================================================
-    # Elliptic (Poisson / Darcy)
+    # Elliptic (Poisson / Darcy) - Deep
     # ============================================================
 
-    def _generate_elliptic_stress(
-        self, rng: random.Random, difficulty: float
-    ) -> List[StressVariant]:
+    def _generate_elliptic_stress(self, rng, difficulty):
         variants = []
-        num = max(3, int(4 + difficulty * 5))
+        num = max(3, int(4 + difficulty * 6))
 
         for i in range(num):
-            source_amplitude = 1.0 + difficulty * rng.uniform(0.5, 4.0)
-            boundary_variation = difficulty * rng.uniform(0.05, 0.4)
-            coeff_variation = difficulty * rng.uniform(0.1, 0.8)
+            source_amplitude = 1.0 + difficulty * rng.uniform(0.5, 5.0)
+            source_location_variation = difficulty * rng.uniform(0.1, 0.6)
+            boundary_strength = 1.0 + difficulty * rng.uniform(-0.3, 0.5)
+            coeff_smoothness = max(0.1, 1.0 - difficulty * rng.uniform(0.2, 0.8))
+            coeff_discontinuity = difficulty * rng.uniform(0.0, 0.7)
 
             parameters = {
                 "source_amplitude": round(source_amplitude, 3),
-                "boundary_variation": round(boundary_variation, 3),
-                "coeff_variation": round(coeff_variation, 3),
+                "source_location_variation": round(source_location_variation, 3),
+                "boundary_strength": round(boundary_strength, 3),
+                "coeff_smoothness": round(coeff_smoothness, 3),
+                "coeff_discontinuity": round(coeff_discontinuity, 3),
             }
 
             variant = StressVariant(
@@ -86,8 +74,9 @@ class ProceduralStressGenerator(BaseStressGenerator):
                 difficulty=difficulty,
                 metadata={
                     "physics_justification": (
-                        "Varying source strength, boundary conditions, and "
-                        "coefficient fields to stress conservation and maximum principle."
+                        "Varying source strength/location, boundary conditions, and "
+                        "coefficient field regularity/discontinuity to stress conservation, "
+                        "maximum principle, and solution regularity."
                     )
                 },
             )
@@ -99,23 +88,23 @@ class ProceduralStressGenerator(BaseStressGenerator):
     # Burgers (Hyperbolic) - Deep
     # ============================================================
 
-    def _generate_burgers_stress(
-        self, rng: random.Random, difficulty: float
-    ) -> List[StressVariant]:
+    def _generate_burgers_stress(self, rng, difficulty):
         variants = []
         num = max(3, int(5 + difficulty * 6))
 
         for i in range(num):
-            shock_strength = 1.0 + difficulty * rng.uniform(0.5, 3.0)
-            hf_amplitude = difficulty * rng.uniform(0.01, 0.15)
-            rollout_steps = int(50 + difficulty * rng.uniform(50, 200))
-            viscosity = max(0.001, 0.01 * (1 + rng.uniform(-0.3, 0.3)))
+            shock_strength = 1.0 + difficulty * rng.uniform(0.5, 3.5)
+            hf_amplitude = difficulty * rng.uniform(0.01, 0.18)
+            rollout_steps = int(50 + difficulty * rng.uniform(50, 250))
+            viscosity = max(0.0005, 0.01 * (1 + rng.uniform(-0.4, 0.4)))
+            initial_condition_noise = difficulty * rng.uniform(0.0, 0.12)
 
             parameters = {
                 "shock_strength": round(shock_strength, 3),
                 "hf_amplitude": round(hf_amplitude, 4),
                 "rollout_steps": rollout_steps,
-                "viscosity": round(viscosity, 5),
+                "viscosity": round(viscosity, 6),
+                "initial_condition_noise": round(initial_condition_noise, 4),
             }
 
             variant = StressVariant(
@@ -125,9 +114,9 @@ class ProceduralStressGenerator(BaseStressGenerator):
                 difficulty=difficulty,
                 metadata={
                     "physics_justification": (
-                        "Varying shock strength, high-frequency content, and "
-                        "rollout length to stress conservation, shock capturing, "
-                        "and long-term stability."
+                        "Varying shock strength, high-frequency content, rollout length, "
+                        "viscosity, and initial condition noise to stress conservation, "
+                        "shock capturing, and long-term stability."
                     )
                 },
             )
@@ -136,24 +125,26 @@ class ProceduralStressGenerator(BaseStressGenerator):
         return variants
 
     # ============================================================
-    # Heat (Parabolic)
+    # Heat (Parabolic) - Deep
     # ============================================================
 
-    def _generate_heat_stress(
-        self, rng: random.Random, difficulty: float
-    ) -> List[StressVariant]:
+    def _generate_heat_stress(self, rng, difficulty):
         variants = []
-        num = max(3, int(4 + difficulty * 5))
+        num = max(3, int(4 + difficulty * 6))
 
         for i in range(num):
-            forcing_amplitude = difficulty * rng.uniform(0.5, 3.0)
-            conductivity_variation = difficulty * rng.uniform(0.1, 0.7)
-            rollout_steps = int(40 + difficulty * rng.uniform(30, 150))
+            forcing_amplitude = difficulty * rng.uniform(0.5, 4.0)
+            forcing_frequency = 0.5 + difficulty * rng.uniform(0.0, 2.5)
+            conductivity_variation = difficulty * rng.uniform(0.1, 0.9)
+            rollout_steps = int(40 + difficulty * rng.uniform(40, 180))
+            initial_condition_roughness = difficulty * rng.uniform(0.0, 0.3)
 
             parameters = {
                 "forcing_amplitude": round(forcing_amplitude, 3),
+                "forcing_frequency": round(forcing_frequency, 2),
                 "conductivity_variation": round(conductivity_variation, 3),
                 "rollout_steps": rollout_steps,
+                "initial_condition_roughness": round(initial_condition_roughness, 3),
             }
 
             variant = StressVariant(
@@ -163,8 +154,9 @@ class ProceduralStressGenerator(BaseStressGenerator):
                 difficulty=difficulty,
                 metadata={
                     "physics_justification": (
-                        "Varying time-dependent forcing and conductivity to stress "
-                        "energy conservation and long-term decay."
+                        "Varying time-dependent forcing amplitude/frequency, conductivity "
+                        "variation, rollout length, and initial condition roughness to "
+                        "stress energy conservation and long-term decay behavior."
                     )
                 },
             )
@@ -173,24 +165,26 @@ class ProceduralStressGenerator(BaseStressGenerator):
         return variants
 
     # ============================================================
-    # Navier-Stokes (Incompressible Flow)
+    # Navier-Stokes (Incompressible Flow) - Deep
     # ============================================================
 
-    def _generate_ns_stress(
-        self, rng: random.Random, difficulty: float
-    ) -> List[StressVariant]:
+    def _generate_ns_stress(self, rng, difficulty):
         variants = []
         num = max(3, int(5 + difficulty * 5))
 
         for i in range(num):
-            reynolds = 50 + difficulty * rng.uniform(20, 80)  # Laminar range
-            geometry_scale = 1.0 + difficulty * rng.uniform(-0.2, 0.4)
-            boundary_perturbation = difficulty * rng.uniform(0.02, 0.15)
+            reynolds = 40 + difficulty * rng.uniform(15, 90)  # Still laminar
+            geometry_scale = 1.0 + difficulty * rng.uniform(-0.25, 0.5)
+            boundary_perturbation = difficulty * rng.uniform(0.02, 0.2)
+            initial_vorticity_noise = difficulty * rng.uniform(0.0, 0.15)
+            forcing_strength = difficulty * rng.uniform(0.0, 0.8)
 
             parameters = {
                 "reynolds": round(reynolds, 1),
                 "geometry_scale": round(geometry_scale, 3),
                 "boundary_perturbation": round(boundary_perturbation, 3),
+                "initial_vorticity_noise": round(initial_vorticity_noise, 3),
+                "forcing_strength": round(forcing_strength, 3),
             }
 
             variant = StressVariant(
@@ -200,8 +194,9 @@ class ProceduralStressGenerator(BaseStressGenerator):
                 difficulty=difficulty,
                 metadata={
                     "physics_justification": (
-                        "Varying Reynolds number and geometry within laminar regime "
-                        "to stress divergence-free condition and energy stability."
+                        "Varying Reynolds number, geometry, boundary conditions, initial "
+                        "vorticity, and weak forcing to stress divergence-free condition, "
+                        "energy stability, and momentum conservation."
                     )
                 },
             )
@@ -210,24 +205,26 @@ class ProceduralStressGenerator(BaseStressGenerator):
         return variants
 
     # ============================================================
-    # Elasticity
+    # Elasticity - Deep
     # ============================================================
 
-    def _generate_elasticity_stress(
-        self, rng: random.Random, difficulty: float
-    ) -> List[StressVariant]:
+    def _generate_elasticity_stress(self, rng, difficulty):
         variants = []
         num = max(3, int(4 + difficulty * 5))
 
         for i in range(num):
-            young_modulus_variation = difficulty * rng.uniform(0.1, 0.6)
-            poisson_ratio = 0.25 + difficulty * rng.uniform(-0.05, 0.1)
-            boundary_displacement = difficulty * rng.uniform(0.05, 0.3)
+            young_modulus_variation = difficulty * rng.uniform(0.15, 0.8)
+            poisson_ratio = 0.22 + difficulty * rng.uniform(-0.08, 0.15)
+            boundary_displacement = difficulty * rng.uniform(0.05, 0.35)
+            material_anisotropy = difficulty * rng.uniform(0.0, 0.6)
+            body_force_strength = difficulty * rng.uniform(0.0, 0.4)
 
             parameters = {
                 "young_modulus_variation": round(young_modulus_variation, 3),
                 "poisson_ratio": round(poisson_ratio, 3),
                 "boundary_displacement": round(boundary_displacement, 3),
+                "material_anisotropy": round(material_anisotropy, 3),
+                "body_force_strength": round(body_force_strength, 3),
             }
 
             variant = StressVariant(
@@ -237,8 +234,9 @@ class ProceduralStressGenerator(BaseStressGenerator):
                 difficulty=difficulty,
                 metadata={
                     "physics_justification": (
-                        "Varying material properties and boundary displacement "
-                        "to stress equilibrium and boundary satisfaction."
+                        "Varying stiffness, Poisson ratio, boundary displacement, material "
+                        "anisotropy, and body forces to stress equilibrium, compatibility, "
+                        "and boundary satisfaction."
                     )
                 },
             )
@@ -247,24 +245,26 @@ class ProceduralStressGenerator(BaseStressGenerator):
         return variants
 
     # ============================================================
-    # Thermo-Elasticity (Multi-physics)
+    # Thermo-Elasticity (Multi-physics) - Deep
     # ============================================================
 
-    def _generate_thermo_elasticity_stress(
-        self, rng: random.Random, difficulty: float
-    ) -> List[StressVariant]:
+    def _generate_thermo_elasticity_stress(self, rng, difficulty):
         variants = []
         num = max(3, int(5 + difficulty * 5))
 
         for i in range(num):
-            thermal_expansion = 1e-5 * (1 + difficulty * rng.uniform(0.2, 1.5))
-            coupling_strength = difficulty * rng.uniform(0.3, 1.2)
-            temperature_variation = difficulty * rng.uniform(10, 80)
+            thermal_expansion = 1e-5 * (1 + difficulty * rng.uniform(0.3, 2.0))
+            coupling_strength = difficulty * rng.uniform(0.4, 1.4)
+            temperature_variation = difficulty * rng.uniform(15, 100)
+            mechanical_damping = max(0.0, 0.3 - difficulty * rng.uniform(0.0, 0.4))
+            heat_source_from_deformation = difficulty * rng.uniform(0.0, 0.7)
 
             parameters = {
                 "thermal_expansion": round(thermal_expansion, 8),
                 "coupling_strength": round(coupling_strength, 3),
                 "temperature_variation": round(temperature_variation, 1),
+                "mechanical_damping": round(mechanical_damping, 3),
+                "heat_source_from_deformation": round(heat_source_from_deformation, 3),
             }
 
             variant = StressVariant(
@@ -274,8 +274,9 @@ class ProceduralStressGenerator(BaseStressGenerator):
                 difficulty=difficulty,
                 metadata={
                     "physics_justification": (
-                        "Varying thermal expansion and coupling strength to stress "
-                        "thermo-mechanical interaction and conservation in coupled system."
+                        "Varying thermal expansion, coupling strength, temperature loading, "
+                        "mechanical damping, and deformation-induced heat source to stress "
+                        "thermo-mechanical energy exchange and coupled conservation laws."
                     )
                 },
             )
@@ -284,9 +285,7 @@ class ProceduralStressGenerator(BaseStressGenerator):
         return variants
 
 
-# ============================================================
-# Register generator for all supported physics classes
-# ============================================================
+# Register for all supported physics classes
 for pc in ["elliptic", "poisson", "darcy", "hyperbolic", "parabolic",
            "incompressible", "navier_stokes", "elasticity",
            "multi_physics", "thermo_elasticity"]:
