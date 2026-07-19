@@ -1,119 +1,143 @@
 # SPEC.md — Hydrogen PDE Subnet Technical Specification
 
-**Version:** 3.4 (Updated July 2026)
+**Version:** 3.5 (Updated July 2026)
 **Status:** Active Development
 
 ---
 
-## 1. System Overview
+## 1. System Overview & Core Agentic Loop
 
-### 1.1 Core Loop
+Hydrogen is a decentralized, agentic system for discovering high-quality, physics-respecting training strategies for neural operator surrogates in engineering and scientific simulation.
 
-```
-Challenge Release → Strategy Submission → Validator Training + Hidden Stress Testing → Physics-Gated Scoring → ChallengeWinnerTracker → Weights (Yuma) → Landscape Learning
-```
+**Core Loop**:
+MCP-enabled Agent/Miner Submission → Validator (deterministic training + hidden stress testing + physics gates) → Multi-Objective Scoring & Detailed Feedback → Results returned to agent + ingestion into Landscape Agent → Causal/symbolic analysis & knowledge base update → Improved priors for future submissions → Compounding discovery.
 
-### 1.2 Design Philosophy
-Physics fidelity first, adversarial robustness via hidden stress + hard gates, decentralized strategy discovery, and information asymmetry.
+**Design Philosophy**:
+- Physics fidelity first via hard/soft gates and multi-objective scoring.
+- Adversarial robustness through hidden stress testing.
+- Agent-friendly participation via MCP with built-in testing/feedback loops.
+- Information asymmetry to prevent gaming while preserving learning signals.
+- Landscape Agent for symbolic feature extraction and causal (DML) knowledge compounding.
+- Determinism and auditability for trust.
+- Decentralized strategy discovery with aligned incentives.
 
-### 1.3 Current Economics
-Standard Yuma Consensus + `ChallengeWinnerTracker` (winner-heavy + exponential decay + dust). Hybrid bounty/stipend model is planned but not active.
-
----
-
-## 2. Scoring, Physics Gates & Stress Testing
-
-### 2.1 Multi-Objective Scoring (45/30/25)
-Physics Fidelity, Robustness, Accuracy → combined score. Only new combined bests on a challenge receive strong weight.
-
-### 2.2 Physics Gates
-Hard gates (mass conservation, energy dissipation, boundary satisfaction, rollout stability, UQ calibration) and soft gates with multiplicative penalties. Phase-field specific gates also defined.
-
-### 2.3 Stress Test Design (Transparency & Auditability)
-
-Hydrogen uses a hidden, physics-grounded stress testing system to evaluate robustness under conditions that miners and agents cannot access during development.
-
-**Core Principles**
-- **Hidden**: Stress conditions are not derivable from public challenge data.
-- **Deterministic & Reproducible**: Given `challenge_id` + validator hotkey, the exact same stress set can be regenerated.
-- **Auditable**: Other validators can verify and reproduce stress sets for dispute resolution.
-- **Physics-Grounded**: Every stress variant has a clear physical justification.
-- **Access-Controlled**: Raw stress data is validator-private until after scoring.
-
-**Architecture**
-- **Tier 1 (Procedural)**: Deterministic parametric variations tailored to physics class (Re, geometry, boundary conditions, coefficients, coupling strength, etc.).
-- **Tier 2 (Data-Driven)**: Relevant slices from The Well dataset with physics-preserving augmentations.
-- **Tier 3 (Future)**: Adversarial / uncertainty-guided / Pareto-front stress generation.
-
-**Seeding Strategy**
-Hierarchical deterministic seeding derived from `challenge_id` + validator hotkey ensures full reproducibility while keeping stress hidden.
-
-**Audit Process**
-- Any validator can regenerate the exact `StressTestSet` from public inputs + validator identity.
-- All stress variants include provenance metadata and physical justification.
-- Dispute resolution is supported via independent regeneration and re-evaluation.
-
-See `docs/STRESS_TEST_DESIGN.md` for the full detailed specification.
-
-### 2.4 ChallengeWinnerTracker
-Per-challenge best score + leader tracking with exponential decay. Produces winner-heavy + participation dust weights.
+**Current Economics**: Standard Yuma + ChallengeWinnerTracker (per-challenge leader tracking with exponential decay and winner-heavy + dust weighting). Hybrid bounty/stipend model planned for later phases.
 
 ---
 
-## 3. Symbolic Layer (Planned)
+## 2. MCP / Agent Interface & Built-in Testing Loop
 
-**ModelingToolkit.jl** for symbolic PDE representation and auto loss weights.
+**MCP (Miner/Agent Communication Protocol)** enables seamless, agent-friendly interaction:
+- Persistent sessions and streaming validation/results.
+- Easy local or remote testing of strategies against the live system or subsets.
+- Low-friction submission and feedback loop designed specifically for autonomous agents and human-in-the-loop workflows.
 
-**DataDrivenDiffEq.jl + PySR** for the Symbolic Regression track (discover governing equations from trajectories, validated on hidden stress data).
-
-Symbolic metadata will be preserved through specialist distillation (Symbolic Gauntlet).
-
----
-
-## 4. Phased Roadmap
-
-### Phase 0 (Current — Completed)
-Core infrastructure: `ChallengeWinnerTracker`, `StrategyStore`, multi-objective physics-gated scorer, validator, MCP server, determinism.
-
-### Phase 1: Customization & Data Ingestion
-- Same 7 core PDE challenges
-- Miners submit LoRA adapters + custom datasets
-- **Abaqus ODB / .fil Ingestion Pipeline**
-- Expanded symbolic regression track using **PySR** + DataDrivenDiffEq
-
-### Phase 2: Multi-Physics Composition
-
-**Coupling Framework: preCICE**
-
-preCICE is the primary coupling library for Phase 2 multi-physics challenges. Specialists act as black-box participants (or via a Hydrogen adapter layer). The validator orchestrates coupled simulations and evaluates results against physics gates.
-
-**Phase 2A** — Verified FSI (Turek/Hron) and CHT benchmarks using preCICE + established solvers.
-**Phase 2B** — Thermo-Elasticity with ~48 Tier-1 references.
-**Phase 2C** — Variant expansion on FSI/CHT/Thermo-elasticity.
-
-### Phase 3: 3D Multi-Physics
-3D FSI, Thermo-Elasticity, and CHT with turbulence bridge, 3D-specific gates, and curriculum from 2D → 3D specialists.
+This design dramatically lowers the barrier to participation and accelerates the rate of strategy iteration and discovery.
 
 ---
 
-## 5. Validator & Scoring Details
+## 3. Validation Mechanism (Detailed)
 
-(Full physics gates tables and multi-objective formula are defined in earlier sections.)
+**Pipeline**:
+1. Strategy retrieval (via StrategyStore).
+2. Deterministic training (seeded from challenge_id + validator identity).
+3. Hidden Stress Test Generation & Evaluation (procedural + Well-based; future adversarial tiers).
+4. Physics Gate Application (hard gates = 0 on violation; soft penalties).
+5. Multi-Objective Scoring (Physics Fidelity 45%, Robustness 30%, Accuracy 25%).
+6. Results + diagnostics returned; full data ingested by Landscape Agent.
+
+**Determinism Guarantees**:
+Hierarchical seeding (master seed from challenge + validator hotkey → sub-seeds for data, training, stress, scoring). PyTorch/JAX determinism flags, DataLoader generators, and environment provenance recording. Reproducibility Harness for verification.
+
+**Stress Test System** (see docs/STRESS_TEST_DESIGN.md for full spec):
+- Tier 1: Procedural parametric variation (physics-class specific, difficulty-adaptive).
+- Tier 2: The Well dataset slices with physics-preserving augmentations.
+- Tier 3 (future): Adversarial/uncertainty-guided/Pareto stress.
+- Full access control (validator-private), auditability, and physical justification metadata.
+
+**Information Asymmetry**: Agents see scores and useful diagnostics but not exact hidden stress conditions or internal gate implementations.
 
 ---
 
-## 6. Future Domains
+## 4. Scoring System
 
-See `docs/FUTURE_DOMAINS.md` for the full analysis of additional domains.
+Multi-objective with combined score. Only new best combined scores on a challenge drive strong weighting via ChallengeWinnerTracker.
 
----
-
-## 7. Current Limitations
-
-- Full stress test pipeline (including Well integration and access control) and preCICE-based multi-physics composition are planned but not yet implemented.
-- Hybrid emissions model is defined but not active.
-- Landscape Agent and Symbolic Gauntlet are future work.
+Physics gates (hard = 0 on critical violations like mass conservation, energy stability, boundary satisfaction; soft multiplicative penalties). Detailed metrics returned for feedback and Landscape ingestion.
 
 ---
 
-*This specification reflects both current implementation and the planned phased roadmap.*
+## 5. ChallengeWinnerTracker & Incentives
+
+Per-challenge tracking with exponential decay. Produces winner-heavy + participation dust weights. Only genuine improvements on the physics + robustness + accuracy metric are strongly rewarded.
+
+---
+
+## 6. Landscape Agent Architecture (Symbolic & Causal Compounding)
+
+**Core Function**: Ingests evaluation results (strategy configs, performance under stress, symbolic features, metrics) and compounds knowledge.
+
+**Components**:
+- **Symbolic Processing**: Extracts/uses conservation laws, symmetries, dimensionless groups, boundary types (via PySR, ModelingToolkit integration planned). Enriches data and supports auto loss weighting.
+- **Causal Learning**: Double Machine Learning (DML) to estimate heterogeneous treatment effects of strategy choices (e.g., loss weight schedules, backbone choices, curricula) on outcomes.
+- **Knowledge Base & Prior Updating**: Maintains evolving priors and causal insights that improve future strategy generation and evaluation.
+- **Outputs**: Better priors for agents, specialist distillation candidates, causal reports, Symbolic Gauntlet inputs.
+
+This creates compounding returns: better data → better insights → better strategies → even richer data.
+
+**Integration**: Feeds into specialist promotion, multi-physics composition, and long-term Foundation Operator development.
+
+---
+
+## 7. Symbolic Layer
+
+- ModelingToolkit.jl for symbolic PDE representation, conservation laws, and auto loss weights.
+- DataDrivenDiffEq.jl + PySR for symbolic regression track (discover governing equations validated on hidden stress data).
+- SymbolicMetadataExtractor (rule-based Phase 0; advanced later).
+- Symbolic Gauntlet during specialist distillation to preserve symbolic properties.
+
+See docs/SYMBOLIC_LAYER_DESIGN.md for details.
+
+---
+
+## 8. Challenge Generation
+
+Deterministic `generate_challenge()` function that produces training/holdout references, stress configuration, and attaches SymbolicMetadata. Supports future advanced stress and multi-physics definitions.
+
+See docs/CHALLENGE_GENERATION_DESIGN.md.
+
+---
+
+## 9. Validator Implementation
+
+Orchestrates MCP handling, deterministic training/stress generation (using centralized seeding utilities), StressEvaluator integration, scoring, and weight submission via ChallengeWinnerTracker.
+
+Full determinism setup (PyTorch flags, sub-seeds) applied per evaluation.
+
+---
+
+## 10. Phased Roadmap (Build-Level)
+
+**Phase 0 (Current Foundations)**: Core scoring, stress testing (procedural + Well for all physics classes), determinism utilities, MCP basics, ChallengeWinnerTracker, symbolic skeleton (PySR runner + metadata), StressEvaluator integration.
+
+**Phase 1**: Abaqus ODB/.fil custom data ingestion, expanded symbolic capabilities, LoRA/custom dataset support, deeper determinism across data loading/training, initial Landscape Agent causal/symbolic updates.
+
+**Phase 2**: Verified multi-physics composition using preCICE (FSI, CHT, Thermo-elasticity benchmarks and variant expansion). Specialist pipelines and staggered coupling. Growing Specialist Bank.
+
+**Phase 3**: 3D multi-physics (FSI, CHT, Thermo-elasticity with turbulence), 3D-specific gates and curriculum from 2D. Advanced Landscape Agent compounding and Foundation Operator/LPM foundations.
+
+---
+
+## 11. Future Domains
+
+See docs/FUTURE_DOMAINS.md for detailed analysis of Electromagnetics, Photonics, Acoustics, Plasmas/Fusion, Quantum-informed modeling, Climate, Nuclear, Biological systems, and others.
+
+---
+
+## 12. Current Limitations
+
+Full adversarial stress tiers, complete Landscape Agent causal/symbolic compounding loop, preCICE-orchestrated multi-physics, and advanced determinism in data/training loops are in active development or planned for near-term phases.
+
+---
+
+*This specification captures both implemented foundations and the detailed build roadmap for the agentic, compounding physics surrogate discovery engine.*
