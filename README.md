@@ -44,12 +44,13 @@ The **Landscape Agent** and Specialist Bank create a compounding moat by continu
 
 Carbon is intentionally designed to make fast, scalable iteration accessible to both humans and autonomous agents. By lowering the barrier to running effective local search loops while maintaining rigorous hidden validation, the subnet creates the conditions for iteration at scale — turning decentralized participation into a powerful engine for discovering better Neural Operator training methodologies.
 
-Miners can submit a strategy at any time with zero local training required — the validator will always perform full training and hidden adversarial evaluation. To help miners arrive at stronger submissions, Carbon provides optional low-friction local tools:
+Three capabilities are prioritized from the start to enable this vision:
 
-- **Estimation Mode**: Near-zero cost approximations based on noisy priors for rapid idea screening.
-- **Light Training Mode** (optional): Actual reduced-budget training from noisy priors with local multi-fidelity evaluation.
+- **Black-box diagnostics with clear tiers**: MCP feedback is deliberately limited to objective scores and high-level categories to protect the hidden evaluation data while still providing useful signal.
+- **Noisy priors + Estimation Mode**: Only noisy versions of strong strategies are shared. A near-zero-cost Estimation Mode allows rapid screening of new ideas using approximations anchored to these noisy priors.
+- **ModelingToolkit.jl integration**: Symbolic constraints discovered by the Landscape Agent will be turned into structured, usable loss terms early, making feedback significantly more actionable for local training loops.
 
-Local loops use different data and stress conditions than the validator’s hidden set, preserving the integrity of official scoring. Training is an enhancement, not a requirement. Cost estimates are provided when using rented compute.
+Miners can submit a strategy at any time with zero local training required — the validator will always perform full training and hidden adversarial evaluation. Optional low-friction local tools (Estimation Mode and Light Training) are available to help miners arrive at stronger submissions. Local loops use different data and stress conditions than the validator’s hidden set. Training is an enhancement, not a requirement.
 
 ### Validator Workflow
 The validator runs in a reproducible Docker container and accepts structured strategy JSON. It dynamically selects the correct neural operator backbone, assembles a deterministic data mixture, trains the model, and evaluates it through a **multi-fidelity pipeline**:
