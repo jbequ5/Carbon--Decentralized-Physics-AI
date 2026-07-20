@@ -16,22 +16,27 @@ A self-improving decentralized intelligence layer for physical modeling — wher
 
 Traditional high-fidelity simulation is too slow and expensive for large design spaces or real-time use. Pure data-driven ML surrogates are fast but often violate fundamental physical constraints, limiting their reliability in engineering.
 
-Carbon produces **physics-informed neural operator surrogates** through a unique engine that delivers:
+Carbon delivers **physics-informed neural operator surrogates** that are fast, robust, and physically trustworthy by leveraging decentralized parallel discovery at scale. Its core value lies in producing higher-quality surrogates than centralized platforms can achieve on their own, through these key mechanisms:
 
-- **Valuable Causal + Symbolic Dataset**: Every evaluation under hidden stress generates rich, physics-grounded data, symbolic features (conservation laws, symmetries), and causal relationships between strategy choices and outcomes. This dataset is far more informative than standard benchmarks and compounds over time.
+- **Superior Training Methodologies at Network Scale**: Agents and miners explore thousands of strategies in parallel. Hidden adversarial stress testing combined with hard physics gates creates strong selection pressure, surfacing training approaches (loss formulations, curricula, conditioning, architectures) that outperform what any single centralized team can discover linearly.
 
-- **Custom Surrogate Design Engine**: Via MCP and the agent-friendly loop (with built-in testing and fast feedback), participants can rapidly develop and validate problem-specific surrogates tailored to specific geometries, coupling strengths, or domains — not generic one-size-fits-all models.
+- **Adversarially Validated Robustness**: High-performing surrogates are not just accurate on public benchmarks — they are rigorously tested under hidden stress conditions with physics-class-specific gates. This provides a level of verifiable robustness and generalization that is extremely difficult for centralized systems to match at scale.
 
-**Broad Market Opportunities**:
-- Core CAE/simulation acceleration (aerospace, automotive, energy, manufacturing)
-- Hardware-in-the-Loop (HIL) and real-time testing
-- Robotics and digital twins of complex systems
+- **Compounding Collective Intelligence**: The Landscape Agent continuously extracts symbolic features and causal relationships from every evaluation. This turns individual discoveries into improving priors, reusable specialist components, and better future strategies for the entire network — creating accelerating returns over time.
+
+- **Trustless Verification & Auditability**: Full determinism, reproducibility, and transparent scoring/gate outcomes enable domain experts, regulators, and downstream systems to have high confidence in the surrogates produced.
+
+These capabilities make Carbon particularly valuable for producing reliable surrogates that power **Software Defined Machines** and **Living Digital Twins** — where models must remain physically trustworthy while being fast enough for real-time use, predictive maintenance, and over-the-air updates.
+
+**Target Markets & Applications**:
+- Core CAE and simulation acceleration (aerospace, automotive, energy, manufacturing)
+- Real-time simulation and Hardware-in-the-Loop (HIL)
 - Multi-physics problems (FSI, CHT, thermo-elasticity)
-- High-impact domains like fusion/plasma, nuclear, and advanced energy systems
-- Quantum-hybrid modeling
-- Long-term foundational physics models
+- Digital twins and predictive maintenance
+- High-stakes domains (fusion, nuclear, advanced energy systems)
+- Long-term foundational physics modeling
 
-The **Landscape Agent** creates a compounding moat by turning every submission into better priors and reusable specialists through symbolic and causal analysis.
+The **Landscape Agent** and Specialist Bank create a compounding moat by continuously improving the quality of strategies and components available to the network.
 
 ---
 
