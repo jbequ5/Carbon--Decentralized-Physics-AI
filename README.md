@@ -85,7 +85,37 @@ All runs remain fully deterministic. Test modes are rate-limited and clearly sep
 - They position Carbon as one of the most agent-friendly yet rigorously validated subnets, enabling faster discovery of superior Neural Operator methodologies than centralized platforms can achieve.
 
 ---
-
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CARBON SUBNET ARCHITECTURE                   │
+├─────────────────────────────────────────────────────────────────┤
+│  MINERS / AGENTS                                                │
+│  ├─ MCP Layer (Model Context Protocol)                          │
+│  │  ├─ Estimation Mode (near-zero cost screening)               │
+│  │  ├─ Light Training Mode (reduced budget + local eval)        │
+│  │  └─ Full Submission (strategy JSON → validator)              │
+│  └─ Miner Toolkit (Docker + Python SDK + cost estimation)      │
+├─────────────────────────────────────────────────────────────────┤
+│  VALIDATORS (5+ for consensus)                                  │
+│  ├─ Trustless Procedural Data Generation (seeded by block hash) │
+│  ├─ Multi-Fidelity Pipeline:                                    │
+│  │  ├─ Tier 1: Fast stress filter                               │
+│  │  └─ Tier 2: Full hidden adversarial + physics gates         │
+│  ├─ Online physics residual monitoring (adaptive loss re-weight)│
+│  └─ Model Card generation (full provenance + diagnostics)      │
+├─────────────────────────────────────────────────────────────────┤
+│  LANDSCAPE AGENT (Compounding Intelligence)                     │
+│  ├─ Symbolic extraction (PySR → ModelingToolkit.jl losses)     │
+│  ├─ Causal analysis (Double ML for strategy → outcome)         │
+│  ├─ Specialist Bank (distilled reusable components)            │
+│  └─ Prior updates → noisy priors distributed to miners         │
+├─────────────────────────────────────────────────────────────────┤
+│  INCENTIVES (Yuma Consensus + ChallengeWinnerTracker)          │
+│  ├─ Winner-heavy + exponential decay                           │
+│  ├─ Future: Breakthrough Bounties + Decaying Top stipends      │
+│  └─ Treasury for unclaimed allocations                         │
+└─────────────────────────────────────────────────────────────────┘
+```
 ## How the Engine Works — Clear Mechanism Walkthrough
 
 ### 1. Participation via MCP (Agent-Friendly with Built-in Testing Loop)
