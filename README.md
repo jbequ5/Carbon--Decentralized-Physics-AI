@@ -192,6 +192,34 @@ Carbon’s primary advantage is its ability to coordinate distributed discovery 
 In short: NVIDIA owns the engine. Dyad and Ansys own the tools. Carbon owns the decentralized, trustlessly verified supply of the models themselves.
 
 ---
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    MODEL LIFECYCLE                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. TRAIN & VERIFY (Carbon Subnet)                              │
+│     ├─ Miner submits strategy                                   │
+│     ├─ Validator trains + runs hidden stress + physics gates    │
+│     ├─ Model Card generated (JSON + ONNX)                       │
+│     ├─ Evidence written to Verification Registry (on-chain)     │
+│     │   model_id → {gate_results, generator_version,            │
+│     │                operational_envelope, validator_set_hash}  │
+│     └─ Model Card + ONNX delivered to customer                  │
+│                                                                 │
+│  2. DEPLOY (Customer / Prime / Partner)                         │
+│     ├─ Downloads: ONNX model + Model Card + Registry proof      │
+│     ├─ Verifies locally: Model Card hash = Registry hash        │
+│     ├─ Deploys ONNX to target (HIL, edge, cloud, air-gapped)   │
+│     └─ **Runs inference LOCALLY — zero network calls**          │
+│                                                                 │
+│  3. VERIFY (Optional, Periodic, Programmatic)                   │
+│     ├─ CI/CD: "Has this model_id been revoked?" (daily build)   │
+│     ├─ HIL Pre-flight: "Is envelope still valid for this run?"  │
+│     ├─ Re-verification: "Generator v1.4 released — re-check?"   │
+│     └─ Audit: "Show me the gate results for model X"            │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Current State & Roadmap
 
