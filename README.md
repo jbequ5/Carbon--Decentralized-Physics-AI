@@ -140,13 +140,13 @@ Miners and agents interact through MCP, which supports persistent sessions, stre
 - **Phase 0**: 7 core single-physics PDE challenges (Poisson, Darcy, Burgers, Navier-Stokes laminar, Heat, Elasticity, Thermo-elasticity).
   
 - **Phase 0.5**: Defense-Relevant Benchmarks (Months 4-8)
-Bridges academic PDEs to weapon-relevant physics:
-- **NACA 0012 Transonic Flutter** — Shock-boundary layer interaction (NASA TP-2001-211214)
-- **NASA CRM Wing-Body** — Transonic separation, buffet (DPW)
-- **HIFiRE-1 Scramjet Forebody** — Hypersonic boundary layer transition (AFRL)
-- **Turek/Hron FSI 3D** — Fluid-structure interaction (preCICE)
-- **Store Separation (6-DOF)** — Moving boundaries, dynamic mesh
-- **Turbine Blade Heat Transfer** — Conjugate heat transfer, film cooling
+  Bridges academic PDEs to weapon-relevant physics:
+  - **NACA 0012 Transonic Flutter** — Shock-boundary layer interaction (NASA TP-2001-211214)
+  - **NASA CRM Wing-Body** — Transonic separation, buffet (DPW)
+  - **HIFiRE-1 Scramjet Forebody** — Hypersonic boundary layer transition (AFRL)
+  - **Turek/Hron FSI 3D** — Fluid-structure interaction (preCICE)
+  - **Store Separation (6-DOF)** — Moving boundaries, dynamic mesh
+  - **Turbine Blade Heat Transfer** — Conjugate heat transfer, film cooling
   
 - **Phase 1**: Phase 0 + 0.5 challenges + custom datasets (including Abaqus ODB/.fil ingestion) and LoRA/custom strategy support.
   
