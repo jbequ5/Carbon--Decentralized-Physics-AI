@@ -10,6 +10,8 @@ Carbon is a Bittensor subnet that builds a decentralized, agentic system where m
 
 A self-improving decentralized intelligence layer for physical modeling — where agents and a central Landscape Agent together create a compounding library of reusable, physics-grounded surrogates and specialists that accelerate engineering design, digital twins, real-time simulation, and scientific discovery. Long-term, this evolves toward foundational models of physics that are fast, robust, and interpretable across domains.
 
+**Carbon occupies the Verification Layer in the Physics-AI stack**: NVIDIA owns the compute engine; Dyad/Ansys/Siemens own the tooling; Carbon owns the decentralized, trustlessly verified supply of models.
+
 ---
 
 ## Value Proposition & Market Opportunity
@@ -26,6 +28,10 @@ Carbon delivers **physics-informed neural operator surrogates** that are fast, r
 
 - **Trustless Verification**: Carbon produces models through a decentralized competitive network with independent, auditable verification. This is structurally difficult for any single company to replicate at scale.
 
+- **Zero Data Risk (Tier 1/2)**: Public/synthetic data only — no proprietary data required to deliver verified surrogates.
+
+- **DI-SESS-82483 Alignment**: Model Cards export directly to DoD Digital Twin Description schema for IV&V/ATO acceleration.
+
 These capabilities make Carbon particularly valuable for producing reliable surrogates that power **Software Defined Machines** and **Living Digital Twins** — where models must remain physically trustworthy while being fast enough for real-time use, predictive maintenance, and over-the-air updates.
 
 **Target Markets & Applications**:
@@ -34,13 +40,13 @@ These capabilities make Carbon particularly valuable for producing reliable surr
 - Multi-physics problems (FSI, CHT, thermo-elasticity)
 - Digital twins and predictive maintenance
 - High-stakes domains (fusion, nuclear, advanced energy systems)
-- Long-term foundational physics建模
+- Long-term foundational physics
 
 The **Landscape Agent** and Specialist Bank create a compounding moat by continuously improving the quality of strategies and components available to the network.
 
 ---
 
-## Validator & Miner Workflows (Upgraded Design)
+## Validator & Miner Workflows
 
 Carbon is intentionally designed to make fast, scalable iteration accessible to both humans and autonomous agents. By lowering the barrier to running effective local search loops while maintaining rigorous hidden validation, the subnet creates the conditions for iteration at scale — turning decentralized participation into a powerful engine for discovering better Neural Operator training methodologies.
 
@@ -52,31 +58,38 @@ Three capabilities are prioritized from the start to enable this vision:
 
 A core architectural feature is the **Trustless Verification and Data Generation System**. All evaluation data (stress and benchmark) is generated procedurally at runtime using an open generator seeded by public, unpredictable information. This keeps the data fresh and hidden while remaining fully auditable. Benchmark data quality is proven through scientific justification of the generator and validation against high-fidelity reference solvers.
 
-Miners can submit a strategy at any time with zero local training required — the validator will always perform full training and hidden adversarial evaluation. Optional low-friction local tools (Estimation Mode and Light Training) are available to help miners arrive at stronger submissions. Local loops use different data and stress conditions than the validator’s hidden set. Training is an enhancement, not a requirement.
+Miners can submit a strategy at any time with zero local training required — the validator will always perform full training and hidden adversarial evaluation. Optional low-friction local tools (Estimation Mode and Light Training) are available to help miners arrive at stronger submissions. Local loops use different data and stress conditions than the validator's hidden set. Miner training loop is an enhancement, not a requirement.
 
 ### Validator Workflow
+
 The validator runs in a reproducible Docker container and accepts structured strategy JSON. It dynamically selects the correct neural operator backbone, assembles a deterministic data mixture, trains the model, and evaluates it through a **multi-fidelity pipeline**:
 
 - **Tier 1 (Fast Filter)**: Low-cost stress testing quickly eliminates weak strategies.
 - **Tier 2 (Full Evaluation)**: Only promising candidates proceed to full hidden stress testing with physics gates.
 
-During training, the validator performs **online physics residual monitoring** with configurable adaptive responses (such as dynamic loss re-weighting within defined bounds). Every run automatically generates a rich **Model Card** containing the exact strategy configuration, training dynamics, held-out metrics, stress results, gate violations with physics explanations, and extracted symbolic features. These cards feed the Landscape Agent and provide strong auditability and provenance.
+During training, the validator performs **online physics residual monitoring** with configurable adaptive responses (such as dynamic loss re-weighting within defined bounds). Every run automatically generates a rich **Model Card** containing the exact strategy configuration, training dynamics, held-out metrics, stress results, gate violations with physics explanations, and extracted symbolic features. **The Model Card and its cryptographic proof are written to the Verification Registry (on-chain) for immutable provenance.** These cards feed the Landscape Agent and provide strong auditability and provenance.
 
 This design delivers high throughput while preserving the adversarial strength of hidden stress testing.
 
-### Miner & Agent Workflow (MCP)
+### Miner/Agent Workflow (MCP)
+
 The MCP layer supports multiple modes so both human miners and autonomous agents can iterate rapidly while receiving **genuine, physics-constrained feedback**:
 
-- **Light Training + Gated Evaluation** (recommended test mode): Reduced training budget followed by held-out evaluation + hidden stress testing + **full physics gates**. Produces a real test score quickly. Does not affect the official leaderboard but is logged and can contribute (with lower weight) to the Landscape Agent.
 - **Simulated / Cached Approximation**: For very early prototyping.
-- **Full Production Submission**: Complete training + full adversarial stress testing. Only these submissions can set new best combined scores and earn strong emissions weight.
+
+- **Light Training + Gated Evaluation** (recommended test mode): Reduced training budget followed by held-out evaluation + hidden stress testing + **full physics gates**. Produces a real test score quickly. Does not
+affect the official leaderboard but is logged and can contribute (with lower weight) to the Landscape Agent.
+  
+- **Full Production Submission**: Strategy submitted to validators for complete training + full adversarial stress testing. Only these submissions can set new best combined scores and earn strong emissions weight.
 
 Additional capabilities include:
-- **Prior-Informed Warm Starts** from the Landscape Agent (using current best priors or distilled specialists).
+- **Noisy Prior-Informed Warm Starts** from the Landscape Agent (using current best priors or distilled specialists).
 - **Explainable Failure Diagnostics** (locations and types of high residuals or gate violations, spectral issues, uncertainty hotspots, and comparisons to recent successful strategies).
 - **Pareto / Multi-Objective Reporting** in test mode (optional) to surface interesting trade-offs.
 
-All runs remain fully deterministic. Test modes are rate-limited and clearly separated from production submissions. This combination enables fast, high-signal iteration without compromising the subnet’s adversarial integrity or incentive alignment.
+All runs remain fully deterministic. Test modes are rate-limited and clearly separated from production submissions. This combination enables fast, high-signal iteration without compromising the subnet's adversarial integrity or incentive alignment.
+
+---
 
 **Why These Design Choices Matter**:
 - They dramatically increase iteration speed for both humans and autonomous agents.
@@ -85,6 +98,7 @@ All runs remain fully deterministic. Test modes are rate-limited and clearly sep
 - They position Carbon as one of the most agent-friendly yet rigorously validated subnets, enabling faster discovery of superior Neural Operator methodologies than centralized platforms can achieve.
 
 ---
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    CARBON SUBNET ARCHITECTURE                   │
@@ -122,9 +136,22 @@ All runs remain fully deterministic. Test modes are rate-limited and clearly sep
 Miners and agents interact through MCP, which supports persistent sessions, streaming validation/results, and easy local or remote testing of strategies. This design makes participation seamless and gives agents a tangible fast-iteration advantage — they can quickly test ideas against the live system or subsets of challenges and receive immediate, actionable diagnostics.
 
 ### 2. Challenges by Phase
+
 - **Phase 0**: 7 core single-physics PDE challenges (Poisson, Darcy, Burgers, Navier-Stokes laminar, Heat, Elasticity, Thermo-elasticity).
-- **Phase 1**: Same challenges + custom datasets (including Abaqus ODB/.fil ingestion) and LoRA/custom strategy support.
+  
+- **Phase 0.5**: Defense-Relevant Benchmarks (Months 4-8)
+Bridges academic PDEs to weapon-relevant physics:
+- **NACA 0012 Transonic Flutter** — Shock-boundary layer interaction (NASA TP-2001-211214)
+- **NASA CRM Wing-Body** — Transonic separation, buffet (DPW)
+- **HIFiRE-1 Scramjet Forebody** — Hypersonic boundary layer transition (AFRL)
+- **Turek/Hron FSI 3D** — Fluid-structure interaction (preCICE)
+- **Store Separation (6-DOF)** — Moving boundaries, dynamic mesh
+- **Turbine Blade Heat Transfer** — Conjugate heat transfer, film cooling
+  
+- **Phase 1**: Phase 0 + 0.5 challenges + custom datasets (including Abaqus ODB/.fil ingestion) and LoRA/custom strategy support.
+  
 - **Phase 2**: Verified multi-physics benchmarks (FSI using Turek/Hron, Conjugate Heat Transfer) with preCICE composition, plus Thermo-elasticity reference cases and variant expansion.
+  
 - **Phase 3**: 3D multi-physics (FSI, CHT, Thermo-elasticity with turbulence), 3D-specific gates, and curriculum progression from 2D specialists.
 
 ### 3. Validation Strategy (The Heart of Robustness)
@@ -148,16 +175,15 @@ Agents receive detailed scores, gate outcomes, and diagnostics. All results are 
 - Updates a compounding knowledge base and priors.
 - Drives specialist distillation and better future challenges.
 
+**Phasing**: PySR symbolic regression (Phase 0) → Double ML causal inference (Phase 1) → Cross-domain causal mapping (Phase 2). ModelingToolkit.jl bridge via JSON serialization first, JuliaCall later.
+
 This creates accelerating returns: better data → better insights → better strategies → even richer data. The Specialist Bank and knowledge base form a self-reinforcing flywheel and long-term moat.
 
 ### 5. Emissions & Incentives
 Current model uses standard Yuma Consensus with the **ChallengeWinnerTracker**:
-- Per-challenge leader tracking with exponential decay on old performance.
+- Per-challenge leader tracking with exponential decay on old performance: `weight = score × e^(-blocks_since_win / half_life)`.
 - Winner-heavy weighting + participation dust for recent contributors.
 - Only genuine new best combined scores drive strong rewards.
-
-Future phases add a hybrid model with Breakthrough Bounties (for record-setting improvements) and Decaying Top stipends, with unclaimed allocations rolling to a treasury.
-
 ---
 
 ## Why This Design Matters
@@ -183,14 +209,38 @@ The broader industry is moving rapidly toward **Software Defined Machines** and 
 
 **Carbon occupies a distinct layer in the stack**:
 
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PHYSICS-AI STACK                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  COMPUTE LAYER          │ NVIDIA (H100, Blackwell, CUDA,        │
+│                         │  TensorRT, Apollo, Cosmos)            │
+│                         │ Demand generator — not competitor      │
+├─────────────────────────┼───────────────────────────────────────┤
+│  MODEL SUPPLY LAYER     │ **CARBON** (Decentralized, Verified,  │
+│                         │  Compounding, Trustless)               │
+│                         │ ◄── NO DIRECT COMPETITOR              │
+├─────────────────────────┼───────────────────────────────────────┤
+│  TOOLING/DEPLOYMENT     │ Ansys, Siemens, Dyad, Dassault,      │
+│                         │ nTop, Rescale                          │
+│                         │ Consumers of Carbon's model supply    │
+├─────────────────────────┼───────────────────────────────────────┤
+│  END USERS              │ Aero/Auto/Energy/Defense — Digital    │
+│                         │ Twins, HIL, Design Optimization,      │
+│                         │ Certification                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 - **NVIDIA** owns the compute engine and is increasingly providing open physics foundation models (Apollo, Cosmos). This is largely a demand generator for Carbon, not a direct competitor.
+  
 - **Dyad, Ansys, Siemens, and similar platforms** own the modeling tools, environments, and deployment infrastructure. They consume and orchestrate models but generally produce them centrally and self-verify.
+  
 - **Carbon** owns the decentralized, independently verified model-supply layer. It produces physics-informed surrogates through competitive network participation with trustless verification — something no single company can replicate at scale. This layer is currently the weakest and most structurally defensible part of the stack.
 
-Carbon’s primary advantage is its ability to coordinate distributed discovery and independent verification at scale. Over time, it can also incorporate privacy-preserving signals from proprietary data using confidential computing and other techniques, but its core strength today lies in public and synthetic data regimes combined with strong collective intelligence.
+Carbon's primary advantage is its ability to coordinate distributed discovery and independent verification at scale. Over time, it can also incorporate privacy-preserving signals from proprietary data using confidential computing and other techniques, but its core strength today lies in public and synthetic data regimes combined with strong collective intelligence.
 
 In short: NVIDIA owns the engine. Dyad and Ansys own the tools. Carbon owns the decentralized, trustlessly verified supply of the models themselves.
-
 ---
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -220,10 +270,41 @@ In short: NVIDIA owns the engine. Dyad and Ansys own the tools. Carbon owns the 
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+## Dual-Regime Model Supply (DoD/Regulated Markets)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PUBLIC REGIME (Carbon Subnet)                                  │
+│  ├─ Discovers architectures on public/synthetic data            │
+│  ├─ Adversarial verification + physics gates                    │
+│  ├─ Outputs: Strategy.json + Model Card + ONNX + Evidence       │
+│  └─ Zero ITAR/controlled data                                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                    CROSS-DOMAIN SOLUTION / SECURE TRANSFER
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  CLASSIFIED REGIME (Prime Enclave IL5/IL6)                      │
+│  ├─ Ingests architecture blueprint (strategy.json)              │
+│  ├─ Fine-tunes on classified telemetry / proprietary geometry   │
+│  ├─ Deploys ONNX locally (HIL, edge, air-gapped)                │
+│  ├─ Runs inference LOCALLY — zero network calls                 │
+│  ├─ Applies ITAR/EAR classification (Prime's ECO)               │
+│  └─ Packages DI-SESS-82483 deliverable + ATO artifacts          │
+└─────────────────────────────────────────────────────────────────┘
+```
+## Go-to-Market: Three Revenue Engines
 
-## Current State & Roadmap
+| Engine | Product | Price | Buyer | Timeline |
+|--------|---------|-------|-------|----------|
+| **Specialist Bank (Tier 1)** | 7→50 certified specialists (ONNX + Model Card + Gate Certs) | $ /yr per model  $$ /yr bundle | Sim teams (Aero/Auto/Energy) | Month 3 |
+| **Sponsored Challenges (Tiers 2-4)** | Custom PDE/geometry challenges | T2: $ (open)<br>T3: $$ (IP-licensed)<br>T4: $$$+ (private/on-prem) | Primes, OEMs, Labs | Month 6-12 |
+| **DoD Subcontract** | Evidence Package for IV&V/ATO (SBIR/BAA) | Phase I: $ (6mo)<br>Phase II: $$ (24mo) | Primes (Shield AI, Anduril, etc.) | Month 12-18 |
 
-Phase 0 foundations (scoring, stress testing across all physics classes, determinism utilities, MCP basics, symbolic skeleton, full integration of stress into scoring, trustless data generation) are advancing rapidly. Phase 1 adds customization, Abaqus ingestion, and deeper symbolic/causal capabilities. Phase 2 brings verified multi-physics with preCICE. Phase 3 expands to 3D and more advanced composition.
+## Current State
+
+**Phase 0** 
+foundations (scoring, stress testing across all physics classes, determinism utilities, MCP basics, symbolic skeleton, full integration of stress into scoring, trustless data generation) are advancing rapidly. 
 
 See `SPEC.md`, `TRUSTLESS_VERIFICATION_AND_DATA_GENERATION.md`, `docs/FUTURE_DOMAINS.md`, and other docs in the repository for full technical details.
 
