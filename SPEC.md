@@ -169,47 +169,37 @@ Miners and agents **never** have access to the validator's hidden test data or t
 **Implementation Specification:**
 
 ```python
-# carbon/estimation/estimator.py
+# carbon/estimation/estimator.py (Phase 0 Implementation)
 class EstimationEngine:
-    """
-    Linear sensitivity approximation around noisy prior.
-    Optional: Small proxy model (3-layer MLP) for nonlinear correction.
-    """
-    
-    def __init__(self, noisy_prior: Strategy, backbone: str, challenge: str):
-        self.noisy_prior = noisy_prior
-        self.backbone = backbone
-        self.challenge = challenge
-        self.proxy_model = self._load_proxy_model()  # 3-layer MLP, 64 hidden
-    
-    def estimate(self, candidate_strategy: Strategy) -> EstimationResult:
-        # 1. Compute parameter delta from noisy prior
-        delta = self._compute_delta(candidate_strategy, self.noisy_prior)
+    def estimate(self, candidate: Strategy, noisy_prior: Strategy) -> EstimationResult:
+        # 1. Parameter delta from noisy prior
+        delta = candidate.params - noisy_prior.params
         
-        # 2. Linear sensitivity (Jacobian wrt strategy params at noisy prior)
-        jacobian = self._compute_jacobian(self.noisy_prior)
-        linear_estimate = jacobian @ delta
+        # 2. Linear sensitivity (Jacobian at noisy prior)
+        # J_ij = ∂score/∂param_j at noisy_prior
+        # Computed via JAX autodiff on validation set
+        jacobian = self._compute_jacobian(noisy_prior)  # shape: (n_params,)
         
-        # 3. Proxy model correction (optional)
-        if self.proxy_model:
-            proxy_input = self._encode_strategy(candidate_strategy)
-            proxy_correction = self.proxy_model(proxy_input)
-            estimate = linear_estimate + proxy_correction
-        else:
-            estimate = linear_estimate
+        # 3. Linear prediction
+        linear_delta = jnp.dot(jacobian, delta)
         
-        # 4. Confidence via ensemble variance (5 proxy models with dropout)
-        confidence = self._compute_confidence(candidate_strategy)
+        # 4. Proxy model correction (3-layer MLP, trained on historical (delta, actual_delta) pairs)
+        proxy_delta = self.proxy_model(delta) if self.proxy_model else 0.0
         
-        # 5. Risk flags
-        risk_flags = self._check_risk_flags(candidate_strategy)
+        # 5. Combined estimate
+        estimated_score = noisy_prior.score + linear_delta + proxy_delta
+        
+        # 6. Confidence from proxy ensemble variance
+        confidence = self._compute_confidence(delta)
+        
+        # 7. Risk flags (heuristic)
+        risk_flags = self._check_risks(candidate, noisy_prior)
         
         return EstimationResult(
-            estimated_score_delta=estimate,
+            estimated_score=estimated_score,
             confidence=confidence,
             risk_flags=risk_flags,
-            method="linear_sensitivity_proxy",
-            compute_time_ms=<100
+            method="linear_sensitivity_proxy"
         )
 ```
 
