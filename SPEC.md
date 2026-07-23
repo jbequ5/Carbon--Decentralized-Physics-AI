@@ -62,12 +62,11 @@ Carbon operates a **Dual-Regime Model Supply** for defense and regulated domains
 
 ## Commercial GTM — Three Revenue Engines
 
-- **Engine 1 — Model Zoo (Tier 1)**: Product, pricing ($20-50k/yr), buyer, motion, differentiation, Phase 0 delivery
-- **Engine 2 — Sponsored Challenges (Tiers 2-4)**: Product, pricing (T2 $150-300k, T3 $400-800k, T4 $800k-2M+), buyer, motion, Challenge Factory CLI, standardized agreements
+- **Engine 1 — Specialist Bank (Tier 1)**: Product, pricing ($/yr), buyer, motion, differentiation, Phase 0 delivery
+- **Engine 2 — Sponsored Challenges (Tiers 2-4)**: Product, pricing (T2 $$, T3 $$$, T4 $$$$), buyer, motion, Challenge Factory CLI, standardized agreements
 - **Engine 3 — DoD Subcontract (SBIR/BAA)**: Positioning, entry vehicle, prime targets, Carbon deliverable, Prime deliverable, Phase 0.5 requirement
 - **Engine 4 — Verification Gas/Registry**: Asset, metering, pricing, partners, scale
 - **Revenue Projections**: Y1-Y4 table
-- **Execution Requirements**: Hires, contracts, milestones
 
 ---
 
