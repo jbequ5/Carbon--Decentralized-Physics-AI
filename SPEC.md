@@ -1,5 +1,4 @@
-# SPEC.md — Carbon Physics Intelligence Subnet (Implementation-Grade)
-
+# Carbon - A Physics Intelligence Subnet
 ---
 
 ## Trustless Verification & Data Generation System
