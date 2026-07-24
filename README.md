@@ -40,7 +40,7 @@ These capabilities make Carbon particularly valuable for producing reliable surr
 - Multi-physics problems (FSI, CHT, thermo-elasticity)
 - Digital twins and predictive maintenance
 - High-stakes domains (fusion, nuclear, advanced energy systems)
-- Long-term foundational physics
+- Long-term foundational physics modeling
 
 The **Landscape Agent** and Specialist Bank create a compounding moat by continuously improving the quality of strategies and components available to the network.
 
@@ -77,8 +77,7 @@ The MCP layer supports multiple modes so both human miners and autonomous agents
 
 - **Simulated / Cached Approximation**: For very early prototyping.
 
-- **Light Training + Gated Evaluation** (recommended test mode): Reduced training budget followed by held-out evaluation + hidden stress testing + **full physics gates**. Produces a real test score quickly. Does not
-affect the official leaderboard but is logged and can contribute (with lower weight) to the Landscape Agent.
+- **Light Training + Gated Evaluation** (recommended test mode): Reduced training budget followed by held-out evaluation + hidden stress testing + **full physics gates**. Produces a real test score quickly. Does not affect the official leaderboard but is logged and can contribute (with lower weight) to the Landscape Agent.
   
 - **Full Production Submission**: Strategy submitted to validators for complete training + full adversarial stress testing. Only these submissions can set new best combined scores and earn strong emissions weight.
 
@@ -139,27 +138,41 @@ Miners and agents interact through MCP, which supports persistent sessions, stre
 
 - **Phase 0**: 7 core single-physics PDE challenges (Poisson, Darcy, Burgers, Navier-Stokes laminar, Heat, Elasticity, Thermo-elasticity).
   
-- **Phase 0.5**: Defense-Relevant Benchmarks (Months 4-8)
+- **Phase 1A**: Compressible Flow (Months 4-8)
   Bridges academic PDEs to weapon-relevant physics:
-  - **NACA 0012 Transonic Flutter** — Shock-boundary layer interaction (NASA TP-2001-211214)
+  - **NACA 0012 Transonic Flutter** — Shock-boundary layer interaction, flutter onset (NASA TP-2001-211214)
   - **NASA CRM Wing-Body** — Transonic separation, buffet (DPW)
+  
+- **Phase 1B**: Reacting Flow + Sequential FSI (Months 8-14)
+  Adds reacting flow, sequential FSI, 6-DOF, and conjugate heat transfer:
   - **HIFiRE-1 Scramjet Forebody** — Hypersonic boundary layer transition (AFRL)
-  - **Turek/Hron FSI 3D** — Fluid-structure interaction (preCICE)
+  - **Turek/Hron FSI 3D (Sequential)** — Fluid-structure interaction (one-way)
   - **Store Separation (6-DOF)** — Moving boundaries, dynamic mesh
   - **Turbine Blade Heat Transfer** — Conjugate heat transfer, film cooling
   
-- **Phase 1**: Phase 0 + 0.5 challenges + custom datasets (including Abaqus ODB/.fil ingestion) and LoRA/custom strategy support.
+- **Phase 2A**: Customization & Intelligence (Months 14-22)
+  Adds LoRA adapters, custom datasets (Abaqus ODB), and ModelingToolkit.jl structured losses.
   
-- **Phase 2**: Verified multi-physics benchmarks (FSI using Turek/Hron, Conjugate Heat Transfer) with preCICE composition, plus Thermo-elasticity reference cases and variant expansion.
+- **Phase 2B**: Air-Gap + Coupling Prep (Months 22-28)
+  Adds air-gapped miner toolkit/validator, preCICE sidecar architecture, and sequential multi-physics ladder.
   
-- **Phase 3**: 3D multi-physics (FSI, CHT, Thermo-elasticity with turbulence), 3D-specific gates, and curriculum progression from 2D specialists.
+- **Phase 3**: Multi-Physics Coupling (Months 28-40)
+  Verified multi-physics benchmarks with preCICE composition:
+  - FSI (Turek/Hron 3D) — NS + Nonlinear Elasticity (preCICE implicit)
+  - CHT (Conjugate Heat Transfer) — NS + Heat (preCICE explicit)
+  - Thermo-Elasticity 3D — NS + Heat + Elasticity (preCICE multi-field)
+  
+- **Phase 4**: Production (Months 40-52)
+  3D multi-physics with turbulence:
+  - 3D FSI + Turbulence, 3D CHT + Turbulence, 3D Thermo-Elasticity + Turbulence
+  - Hypersonic 6-DOF — Reacting NS + 6-DOF + Ablation
 
 ### 3. Validation Strategy (The Heart of Robustness)
 Every submission goes through a rigorous, hidden validation process powered by the Trustless Verification and Data Generation System:
 
 - **Benchmarking**: Performance on procedurally generated held-out data (accuracy component).
 - **Hidden Stress Testing**: Adversarial evaluation under fresh, hidden conditions generated at runtime.
-- **Physics Gates**: Hard gates (e.g., mass conservation, energy dissipation/stability, boundary satisfaction, rollout stability, UQ calibration) that zero the score on critical violations.
+- **Physics Gates**: Hard gates (e.g., mass conservation, energy dissipation/stability, boundary satisfaction, rollout stability, UQ calibration, adjoint consistency, shock capture, species conservation, chemistry UQ, interface continuity, momentum/energy conservation, coupling convergence, vorticity preservation, boundary layer resolution, turbulence spectra, separation prediction, ablation recession) that zero the score on critical violations.
 - **Multi-Objective Scoring (45/30/25)**: 
   - Physics Fidelity (45%): Residuals, conservation laws, boundary conditions, stability.
   - Robustness (30%): Performance under hidden stress, long-term rollout, generalization.
@@ -175,15 +188,17 @@ Agents receive detailed scores, gate outcomes, and diagnostics. All results are 
 - Updates a compounding knowledge base and priors.
 - Drives specialist distillation and better future challenges.
 
-**Phasing**: PySR symbolic regression (Phase 0) → Double ML causal inference (Phase 1) → Cross-domain causal mapping (Phase 2). ModelingToolkit.jl bridge via JSON serialization first, JuliaCall later.
+**Phasing**: PySR symbolic regression (Phase 0) → ModelingToolkit.jl bridge (Phase 1) → Double ML causal inference (Phase 2A) → Cross-domain causal mapping (Phase 2B). ModelingToolkit.jl bridge via JSON serialization first, JuliaCall later.
 
 This creates accelerating returns: better data → better insights → better strategies → even richer data. The Specialist Bank and knowledge base form a self-reinforcing flywheel and long-term moat.
 
 ### 5. Emissions & Incentives
 Current model uses standard Yuma Consensus with the **ChallengeWinnerTracker**:
-- Per-challenge leader tracking with exponential decay on old performance: `weight = score × e^(-blocks_since_win / half_life)`.
+- Per-challenge leader tracking with exponential decay on old performance: `weight = score × e^(-blocks_since_win / half_life)` (half_life = 30 days, tunable via governance).
 - Winner-heavy weighting + participation dust for recent contributors.
 - Only genuine new best combined scores drive strong rewards.
+- Future phases add hybrid model with Breakthrough Bounties (record-setting improvements) and Decaying Top stipends, with unclaimed allocations rolling to treasury.
+
 ---
 
 ## Why This Design Matters
@@ -293,18 +308,24 @@ In short: NVIDIA owns the engine. Dyad and Ansys own the tools. Carbon owns the 
 │  └─ Packages DI-SESS-82483 deliverable + ATO artifacts          │
 └─────────────────────────────────────────────────────────────────┘
 ```
+- Public Regime: Subnet mechanics, evidence generation, zero ITAR
+- Transfer Layer: Cross-domain solution, secure media, CDS
+- Classified Regime: Air-Gapped Miner Toolkit, fine-tuning loop, ITAR classification, DI-SESS-82483 packaging, ATO evidence
+- Prime Onboarding Checklist (clearance, facility, contract vehicle)
+- Evidence Package Schema (Model Card → DI-SESS-82483 manifest)
+
 ## Go-to-Market: Three Revenue Engines
 
 | Engine | Product | Price | Buyer | Timeline |
 |--------|---------|-------|-------|----------|
-| **Specialist Bank (Tier 1)** | 7→50 certified specialists (ONNX + Model Card + Gate Certs) | $ /yr per model  $$ /yr bundle | Sim teams (Aero/Auto/Energy) | Month 3 |
-| **Sponsored Challenges (Tiers 2-4)** | Custom PDE/geometry challenges | T2: $ (open)<br>T3: $$ (IP-licensed)<br>T4: $$$+ (private/on-prem) | Primes, OEMs, Labs | Month 6-12 |
-| **DoD Subcontract** | Evidence Package for IV&V/ATO (SBIR/BAA) | Phase I: $ (6mo)<br>Phase II: $$ (24mo) | Primes (Shield AI, Anduril, etc.) | Month 12-18 |
+| **Specialist Bank (Tier 1)** | 7→50 certified specialists (ONNX + Model Card + Gate Certs) | $10-50k/yr per model / $100-200k/yr bundle | Sim teams (Aero/Auto/Energy) | Month 3 |
+| **Sponsored Challenges (Tiers 2-4)** | Custom PDE/geometry challenges | T2: $150-300k (open)<br>T3: $400-800k (IP-licensed)<br>T4: $800k-2M+ (private/on-prem) | Primes, OEMs, Labs | Month 6-12 |
+| **DoD Subcontract (SBIR/BAA)** | Evidence Package for IV&V/ATO | Phase I: $250k (6mo)<br>Phase II: $1.5-2M (24mo) | Primes (Shield AI, Anduril, etc.) | Month 12-18 |
+| **Verification Gas/Registry** | Programmatic badge resolution, model card API | $0.001-0.01/query (USD-denominated, α-settled) | Tooling platforms (Dyad, Ansys, nTop, Rescale) | Month 12+ |
 
 ## Current State
 
-**Phase 0** 
-foundations (scoring, stress testing across all physics classes, determinism utilities, MCP basics, symbolic skeleton, full integration of stress into scoring, trustless data generation) are advancing rapidly. 
+**Phase 0** foundations (scoring, stress testing across all physics classes, determinism utilities, MCP basics, symbolic skeleton, full integration of stress into scoring, trustless data generation) are advancing rapidly. 
 
 See `SPEC.md`, `TRUSTLESS_VERIFICATION_AND_DATA_GENERATION.md`, `docs/FUTURE_DOMAINS.md`, and other docs in the repository for full technical details.
 
@@ -327,3 +348,6 @@ We welcome contributions in stress testing, determinism, symbolic integration, M
 ---
 
 *Carbon is building the decentralized agentic infrastructure for trustworthy, compounding physical intelligence in engineering and science.*
+```
+
+Now let me generate the updated SPEC.md:
