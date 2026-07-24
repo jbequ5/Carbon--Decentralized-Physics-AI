@@ -1,9 +1,9 @@
 # IMPLEMENTATION.md — Carbon Physics Intelligence Subnet
 
-**Version:** 2.0 (July 2026)  
+**Version:** 3.0 (July 2026)  
 **Status:** Core Engineering Implementation Guide  
 **Audience:** Harshdeep Sharma (Tech Lead) + Engineering Team  
-**Purpose:** Build-level implementation details for every component in `SPEC.md`
+**Purpose:** Build-level implementation details for every component in `SPEC.md` — **now with Julia/SciML Ground Truth Oracle integration**
 
 ---
 
@@ -19,6 +19,9 @@
 8. [MCP Protocol](#8-mcp-protocol)
 9. [Reproducibility & Determinism](#9-reproducibility--determinism)
 10. [Operational Infrastructure](#10-operational-infrastructure)
+11. [Julia/SciML Ground Truth Service](#11-juliasciml-ground-truth-service)
+12. [Python-Julia Bridge (SciMLClient)](#12-python-julia-bridge-scimlclient)
+13. [Julia/SciML Service Deployment](#13-juliasciml-service-deployment)
 
 ---
 
@@ -101,7 +104,7 @@ def unified_loss_fn(
 ### Problem
 Miners control `epochs` parameter. Rogue submissions can request extreme epoch counts. Python loops prevent JAX optimization and make hard limits unenforceable.
 
-### Solution: `lax.scan` + Hard Safety Rails (Inside + Outside JIT)
+### Solution: `lax.scan` + Hard Safety Rails
 
 ```python
 # carbon/validator/training.py
@@ -179,7 +182,7 @@ def create_training_loop(
     def epoch_step(state: Tuple, _):
         loop_state, epoch_idx = state
         
-        def execution_branch(ls):
+        def execution_branch(ls: LoopState):
             new_state, epoch_loss = train_step(ls.state, current_batch)
             
             improved = epoch_loss < ls.best_loss
@@ -195,7 +198,7 @@ def create_training_loop(
                 epoch=ls.epoch + 1
             ), epoch_loss
         
-        def short_circuit_branch(ls):
+        def short_circuit_branch(ls: LoopState):
             return ls, ls.best_loss
         
         next_loop_state, epoch_loss = lax.cond(
@@ -206,7 +209,7 @@ def create_training_loop(
         )
         return (next_loop_state, epoch_idx + 1), epoch_loss
     
-    def fit(init_state, data_loader, max_epochs: int):
+    def fit(init_state: TrainState, data_loader, max_epochs: int):
         effective_epochs = max_epochs
         if hard_step_limit is not None:
             effective_epochs = min(max_epochs, hard_step_limit)
@@ -567,9 +570,9 @@ ENV FLAX_VERSION=0.8.4
 
 ---
 
-## 2. Physics Gates Implementation
+# 2. Physics Gates Implementation
 
-### 2.1 Mass Conservation (Continuity)
+## 2.1 Core Physics Gates (Phase 0+)
 
 ```python
 # carbon/validator/physics_gates.py
@@ -697,6 +700,222 @@ def run_all_gates(model_fn: Callable, challenge: str, params: Dict,
     return gates
 ```
 
+## 2.2 Advanced Physics Gates (Phase 1A+)
+
+### Adjoint Consistency Gate (Phase 1A+) — **Powered by SciMLSensitivity.jl**
+
+```python
+# carbon/validator/physics_gates.py
+from carbon.sciml.client import SciMLClient
+
+# Initialize SciML client for Julia/SciML bridge
+sciml_client = SciMLClient(base_url="http://localhost:8083")
+
+@jit
+def adjoint_consistency_gate(model_fn, challenge, params, tol=1e-4):
+    """
+    Verify adjoint consistency for optimization-grade surrogates.
+    Uses SciMLSensitivity.jl for exact adjoint computation via Julia/SciML bridge.
+    """
+    # Forward pass
+    primal_out = model_fn(params)
+    
+    # Adjoint solve via SciMLSensitivity.jl (via Julia bridge)
+    adj_grad = await sciml_client.compute_adjoint_sensitivity(
+        model_fn=model_fn,
+        params=params,
+        loss_fn="objective"
+    )
+    
+    # Finite difference check
+    fd_grad = finite_difference_gradient(model_fn, params)
+    
+    rel_error = jnp.linalg.norm(adj_grad - fd_grad) / (jnp.linalg.norm(fd_grad) + 1e-12)
+    
+    return GateResult(
+        gate_id="adjoint_consistency",
+        threshold=1e-4,
+        result=float(rel_error),
+        status="PASS" if rel_error < 1e-4 else "FAIL"
+    )
+```
+
+### Turbulence UQ Gate (Phase 1A+) — **With Model-Form Uncertainty**
+
+```python
+# carbon/validator/physics_gates.py
+
+def turbulence_uq_gate(model_fn, stress_data, params, challenge_config):
+    """
+    Turbulence model-form uncertainty quantification gate.
+    Uses model-form uncertainty budget from generator config.
+    """
+    # Get turbulence model-form uncertainty budget from challenge config
+    turb_uncertainty = challenge_config.get("turbulence_uncertainty", {})
+    models_tested = turb_uncertainty.get("models_tested", ["spalart_allmaras", "komega_sst"])
+    baseline_model = turb_uncertainty.get("baseline_model", "spalart_allmaras")
+    
+    # Compute residuals across turbulence models
+    residuals = {}
+    for model in models_tested:
+        # Run model with different turbulence model
+        residuals[model] = compute_turbulence_residual(model_fn, stress_data, params, model)
+    
+    # Gate margin includes turbulence model-form uncertainty
+    baseline_residual = residuals[baseline_model]
+    model_form_uncertainty = max(abs(residuals[m] - baseline_residual) for m in models_tested)
+    
+    # Total threshold = numerical_error + model_form_uncertainty + 3σ
+    total_threshold = numerical_error + model_form_uncertainty + 3 * sigma
+    
+    return GateResult(
+        gate_id="turbulence_uq",
+        threshold=total_threshold,
+        result=baseline_residual,
+        status="PASS" if baseline_residual < total_threshold else "FAIL",
+        details={"model_form_uncertainty": model_form_uncertainty, "models_tested": models_tested}
+    )
+```
+
+### Chemistry UQ Gate (Phase 1B+) — **HIFiRE Scramjet**
+
+```python
+def chemistry_uq_gate(model_fn, stress_data, params, challenge_config):
+    """Chemistry model-form uncertainty quantification for reacting flows."""
+    chem_uncertainty = challenge_config.get("chemistry_uncertainty", {})
+    mechanisms_tested = chem_uncertainty.get("mechanisms_tested", ["GRI-Mech_3.0", "Park_1993"])
+    baseline_mechanism = chem_uncertainty.get("baseline_mechanism", "GRI-Mech_3.0")
+    
+    # Uncertainty budget per species
+    uncertainty_budget = chem_uncertainty.get("uncertainty_budget", {
+        "heat_flux": 0.20,
+        "species_concentration": 0.25,
+        "surface_recession": 0.30
+    })
+    
+    # Run model with different chemistry mechanisms
+    residuals = {}
+    for mech in mechanisms_tested:
+        residuals[mech] = compute_chemistry_residual(model_fn, stress_data, params, mech)
+    
+    # Gate includes chemistry model-form uncertainty
+    return GateResult(...)
+```
+
+### Sequential FSI Interface Gate (Phase 1B+)
+
+```python
+def sequential_fsi_interface_gate(model_fn, stress_data, params):
+    """One-way FSI interface gate: fluid → solid traction continuity."""
+    # Check velocity continuity at fluid-solid interface
+    fluid_velocity = model_fn.fluid_velocity_at_interface(stress_data["interface_coords"], params)
+    solid_velocity = model_fn.solid_velocity_at_interface(stress_data["interface_coords"], params)
+    
+    velocity_jump = jnp.linalg.norm(fluid_velocity - solid_velocity)
+    
+    return GateResult(
+        gate_id="sequential_fsi_interface",
+        threshold=1e-4,  # velocity jump tolerance
+        result=float(velocity_jump),
+        status="PASS" if velocity_jump < 1e-4 else "FAIL",
+        details={"fluid_velocity": fluid_velocity, "solid_velocity": solid_velocity}
+    )
+```
+
+### Coupling Gates (Phase 3+) — **preCICE Multi-Physics**
+
+```python
+def coupling_gates(model_fn, stress_data, params, coupling_config):
+    """Multi-physics coupling gates for preCICE-coupled simulations."""
+    
+    gates = []
+    
+    # Interface Continuity (velocity/traction matching)
+    interface_residual = compute_interface_residual(model_fn, stress_data, params)
+    gates.append(GateResult(
+        gate_id="interface_continuity",
+        threshold=1e-4,
+        result=float(interface_residual),
+        status="PASS" if interface_residual < 1e-4 else "FAIL"
+    ))
+    
+    # Momentum Conservation Across Interface
+    momentum_jump = compute_momentum_jump(model_fn, stress_data, params)
+    gates.append(GateResult(
+        gate_id="momentum_conservation",
+        threshold=1e-5,
+        result=float(momentum_jump),
+        status="PASS" if momentum_jump < 1e-5 else "FAIL"
+    ))
+    
+    # Energy Conservation Across Coupling
+    energy_jump = compute_energy_jump(model_fn, stress_data, params)
+    gates.append(GateResult(
+        gate_id="energy_conservation",
+        threshold=1e-5,
+        result=float(energy_jump),
+        status="PASS" if energy_jump < 1e-5 else "FAIL"
+    ))
+    
+    # Coupling Convergence
+    coupling_residual = compute_coupling_residual(model_fn, stress_data, params)
+    gates.append(GateResult(
+        gate_id="coupling_convergence",
+        threshold=1e-6,
+        result=float(coupling_residual),
+        status="PASS" if coupling_residual < 1e-6 else "FAIL"
+    ))
+    
+    return gates
+```
+
+### 3D Turbulence Gates (Phase 4)
+
+```python
+def turbulence_3d_gates(model_fn, stress_data, params):
+    """3D turbulence-specific gates for Phase 4."""
+    
+    gates = []
+    
+    # Vorticity Preservation
+    vorticity_error = compute_vorticity_error(model_fn, stress_data, params)
+    gates.append(GateResult(
+        gate_id="vorticity_preservation",
+        threshold=0.1,
+        result=float(vorticity_error),
+        status="PASS" if vorticity_error < 0.1 else "FAIL"
+    ))
+    
+    # Boundary Layer Resolution
+    yplus_error = compute_yplus_error(model_fn, stress_data, params)
+    gates.append(GateResult(
+        gate_id="boundary_layer_resolution",
+        threshold=0.05,
+        result=float(yplus_error),
+        status="PASS" if yplus_error < 0.05 else "FAIL"
+    ))
+    
+    # Turbulence Spectra Match
+    spectra_slope_error = compute_spectra_slope_error(model_fn, stress_data, params)
+    gates.append(GateResult(
+        gate_id="turbulence_spectra_match",
+        threshold=0.1,
+        result=float(abs(spectra_slope_error - (-5/3))),
+        status="PASS" if abs(spectra_slope_error - (-5/3)) < 0.1 else "FAIL"
+    ))
+    
+    # Separation Prediction
+    separation_error = compute_separation_error(model_fn, stress_data, params)
+    gates.append(GateResult(
+        gate_id="separation_prediction",
+        threshold=0.05,
+        result=float(separation_error),
+        status="PASS" if separation_error < 0.05 else "FAIL"
+    ))
+    
+    return gates
+```
+
 ---
 
 ## 3. Procedural Generators
@@ -751,7 +970,7 @@ class ProceduralGenerator(ABC):
         }
 ```
 
-### 3.2 Phase 0: JAX-FEM Generators (Online)
+### Phase 0: JAX-FEM Generators (Online)
 
 ```python
 # carbon/generators/poisson.py
@@ -772,7 +991,7 @@ class PoissonGenerator(ProceduralGenerator):
         u = self._solve_poisson(k, f)
         
         return {
-            "coords": self.grid,           # (64, 64, 2)
+            "coords": self.grid,
             "inputs": {"coefficient": k, "source": f},
             "targets": {"solution": u},
             "boundary_mask": self.bc_mask
@@ -784,7 +1003,7 @@ class PoissonGenerator(ProceduralGenerator):
         pass
 ```
 
-### 3.3 Phase 1A: Compressible NS (Hybrid Online/Offline)
+### Phase 1A: Compressible NS (Hybrid Online/Offline)
 
 ```python
 # carbon/generators/compressible_ns.py
@@ -821,7 +1040,7 @@ class CompressibleNSGenerator(ProceduralGenerator):
         }
 ```
 
-### 3.4 Phase 1B: Precomputed Generators (Reacting Flow, FSI, 6-DOF, CHT)
+### Phase 1B: Precomputed Generators (Reacting Flow, FSI, 6-DOF, CHT)
 
 ```python
 # carbon/generators/reacting_ns.py
@@ -851,7 +1070,7 @@ class ReactingNSGenerator(ProceduralGenerator):
         }
 ```
 
-### 3.5 Stress Generator (Hidden, Fresh Every Eval)
+### Stress Generator (Hidden, Fresh Every Eval)
 
 ```python
 # carbon/generators/stress.py
@@ -931,9 +1150,9 @@ class StressGenerator(ProceduralGenerator):
 
 ---
 
-## 5. Validator Training Pipeline
+## 4. Validator Training Pipeline
 
-### 5.1 Complete Training Pipeline
+### 4.1 Complete Training Pipeline with SciML Integration
 
 ```python
 # carbon/validator/training.py
@@ -944,6 +1163,7 @@ import orbax.checkpoint as ocp
 from flax.training import train_state
 from typing import Callable, Dict, Any
 import yaml
+from carbon.sciml.client import SciMLClient
 
 class TrainState(train_state.TrainState):
     epoch: int
@@ -954,6 +1174,7 @@ class ValidatorTrainer:
     def __init__(self, config: Dict):
         self.config = config
         self.checkpointer = ocp.StandardCheckpointer()
+        self.sciml_client = SciMLClient()  # Julia/SciML bridge
     
     def create_train_state(self, model_fn: Callable, params: Dict, 
                            strategy: Dict, rng: jax.Array) -> TrainState:
@@ -979,16 +1200,6 @@ class ValidatorTrainer:
         )
         return tx
     
-    def _create_lr_schedule(self, training_config: Dict) -> optax.Schedule:
-        schedule_type = training_config.get("lr_schedule", "cosine_warm_restarts")
-        if schedule_type == "cosine_warm_restarts":
-            return optax.cosine_decay_schedule(
-                init_value=training_config["learning_rate"],
-                decay_steps=training_config["epochs"],
-                alpha=0.01
-            )
-        # ... other schedules
-    
     def train(self, state: TrainState, train_loader, val_loader, 
               strategy: Dict, physics_gates_fn) -> TrainState:
         """Main training loop with checkpointing and adaptive loss reweighting."""
@@ -1001,6 +1212,12 @@ class ValidatorTrainer:
             if epoch % 10 == 0 or epoch == self.config["training"]["epochs"] - 1:
                 val_metrics = self._validate(state, val_loader)
                 gate_results = self._run_physics_gates(state)
+                
+                # SciML Validation: Compare against Ground Truth Oracle
+                if epoch % 50 == 0:  # Periodic SciML validation
+                    sciml_validation = await self._sciml_validation(state, strategy)
+                    if not sciml_validation["passes"]:
+                        logger.warning(f"SciML validation failed: {sciml_validation}")
                 
                 # Adaptive loss reweighting
                 state = self._adaptive_reweight(state, gate_results, strategy)
@@ -1015,34 +1232,63 @@ class ValidatorTrainer:
         
         return state
     
-    def _adaptive_reweight(self, state: TrainState, gate_results: List, 
-                          strategy: Dict) -> TrainState:
-        """Adaptive loss reweighting within bounds."""
-        if not strategy["loss"].get("adaptive_reweighting", {}).get("enabled"):
-            return state
+    async def _sciml_validation(self, state: TrainState, strategy: Dict) -> Dict:
+        """Validate trained model against Julia/SciML Ground Truth Oracle."""
+        # Get challenge spec
+        challenge_id = strategy["challenge_id"]
+        challenge_spec = self.get_challenge_spec(strategy["challenge_id"])
         
-        bounds = strategy["loss"]["adaptive_reweighting"]["bounds"]
-        # Adjust loss weights based on gate margins
-        # ... implementation
-        return state
-    
-    def _save_checkpoint(self, state: TrainState, epoch: int):
-        """Save checkpoint with Orbax."""
-        ckpt = {
-            "model": state.params,
-            "optimizer": state.opt_state,
-            "epoch": epoch,
-            "best_score": state.best_score,
-            "rng": state.rng
+        # Get reference solution from Julia/SciML Ground Truth Oracle
+        reference = await self.sciml_client.solve_pde_reference(
+            pde_spec=challenge_spec.pde_spec,
+            params=strategy.get("pde_params", {})
+        )
+        
+        # Evaluate model on reference grid
+        model_prediction = self._evaluate_on_grid(state.params, reference["coords"])
+        
+        # Compute error metrics
+        error_metrics = self._compute_error_metrics(model_prediction, reference["solution"])
+        
+        return {
+            "passes": all(v < 1e-3 for v in error_metrics.values()),
+            "error_metrics": error_metrics,
+            "reference_solution": reference
         }
-        self.checkpointer.save(f"/checkpoints/epoch_{epoch}", ckpt)
+    
+    def _run_physics_gates(self, state: TrainState) -> List[GateResult]:
+        """Run physics gates with SciML validation for adjoint gate."""
+        # Standard gates
+        gate_results = run_all_gates(
+            model_fn=self.model_apply_fn,
+            challenge=self.current_challenge,
+            params=state.params,
+            stress_data=self.stress_data,
+            generator_version=self.generator_version
+        )
+        
+        # Adjoint Consistency Gate via SciMLSensitivity.jl (Phase 1A+)
+        if self.config.get("adjoint_consistency_gate", False):
+            adjoint_result = await self.sciml_client.compute_adjoint_sensitivity(
+                model_fn=self.model_apply_fn,
+                params=state.params,
+                loss_fn="physics_residual"
+            )
+            gate_results.append(GateResult(
+                gate_id="adjoint_consistency",
+                threshold=1e-4,
+                result=adjoint_result["rel_error"],
+                status="PASS" if adjoint_result["rel_error"] < 1e-4 else "FAIL"
+            ))
+        
+        return gate_results
 ```
 
 ---
 
-## 6. Landscape Agent Pipeline
+# 5. Landscape Agent Pipeline
 
-### 6.1 Pipeline Architecture
+## 5.1 Pipeline Architecture with Julia/SciML Bridge
 
 ```python
 # carbon/landscape/pipeline.py
@@ -1050,9 +1296,10 @@ class LandscapeAgent:
     def __init__(self, config: Dict):
         self.pysr_config = config.get("pysr", PYSR_CONFIG)
         self.dml_config = config.get("dml", DML_CONFIG)
-        self.mt_bridge = ModelingToolkitBridge()
+        self.mt_bridge = ModelingToolkitBridge()  # Julia bridge
         self.specialist_bank = SpecialistBank()
         self.prior_engine = PriorEngine()
+        self.sciml_client = SciMLClient()  # Julia/SciML bridge
     
     def ingest_model_card(self, model_card: ModelCard):
         """Process new model card, update knowledge base."""
@@ -1070,7 +1317,7 @@ class LandscapeAgent:
         """Run PySR symbolic regression on accumulated data."""
         equations = pysr_regress(self.pysr_dataset, self.pysr_config)
         for eq in equations:
-            # Convert to structured loss term
+            # Convert to structured loss term via Julia/MT.jl bridge
             loss_term = self.mt_bridge.json_to_loss_term(eq.json)
             self.specialist_bank.add_loss_term(loss_term)
         
@@ -1079,9 +1326,6 @@ class LandscapeAgent:
     
     def _run_dml(self):
         """Run Double ML causal inference."""
-        # Treatment: strategy choices (discretized)
-        # Outcome: robustness_score
-        # Confounders: physics_class, data_seed, backbone
         causal_effects = double_ml(self.dml_dataset, self.dml_config)
         
         # Generate strategic guidance
@@ -1094,41 +1338,15 @@ class LandscapeAgent:
         return self._add_noise(base, noise_scale=0.1)
 ```
 
-### PySR Configuration (Phase 0)
-
-```python
-# carbon/landscape/pysr_config.py
-PYSR_CONFIG = {
-    "populations": 50,
-    "population_size": 100,
-    "ncycles_per_iteration": 500,
-    "maxsize": 40,
-    "maxdepth": 8,
-    "binary_operators": ["+", "-", "*", "/", "^"],
-    "unary_operators": ["sin", "cos", "exp", "log", "sqrt", "abs"],
-    "constraints": {"pow": (-1, 1)},
-    "complexity_of_operators": {"+": 1, "-": 1, "*": 2, "/": 2, "^": 3},
-    "feature_names": [
-        "loss_data_weight", "loss_physics_weight", "loss_boundary_weight",
-        "lr_initial", "lr_decay_rate", "curriculum_phase", "backbone_depth",
-        "backbone_width", "activation_type", "normalization_type",
-        "physics_gate_margin", "residual_l2", "conservation_l2", "boundary_l2"
-    ],
-    "target_name": "robustness_score",
-    "verbosity": 1,
-    "batch_size": 1000,
-    "early_stop_condition": "stop_if_no_improvement(50)",
-}
-```
-
-### ModelingToolkit.jl Bridge (JSON → JAX Loss Terms)
+### ModelingToolkit.jl Bridge (JSON → JAX Loss Terms) — **Via Julia Bridge**
 
 ```julia
 # carbon/landscape/bridge.jl
 module CarbonMTBridge
 using ModelingToolkit, Symbolics, JSON3, StructTypes
 
-function json_to_loss_term(json_expr::Dict) 
+function json_to_loss_term(json_expr::Dict) -> ModelingToolkit.Equation
+    """Convert PySR JSON expression to MT differentiable loss term."""
     @variables t x y z
     @parameters p[1:20]  # strategy params
     
@@ -1181,9 +1399,9 @@ DML_CONFIG = {
 
 ---
 
-## 7. Miner Toolkit & SDK
+## 6. Miner Toolkit & SDK
 
-### 7.1 Miner Toolkit Docker Image
+### 6.1 Miner Toolkit Docker Image
 
 ```dockerfile
 # carbon/miner/Dockerfile
@@ -1304,7 +1522,7 @@ class AsyncCarbonMiner(CarbonMiner):
 
 ---
 
-## 8. Genesis Contracts (Immutable, Deployed at Subnet Genesis)
+## 7. Genesis Contracts (Immutable, Deployed at Subnet Genesis)
 
 ### CarbonTreasury.sol
 
@@ -1537,6 +1755,73 @@ contract VerificationGas {
 }
 ```
 
+```solidity
+// contracts/PartnerStaking.sol
+contract PartnerStaking {
+    IERC20 public immutable ALPHA;
+    
+    enum Tier { NONE, TIER_1, TIER_2, TIER_3 }
+    
+    struct PartnerInfo {
+        Tier tier;
+        uint256 stakeAmount;
+        uint256 stakedAt;
+        bool slashed;
+    }
+    
+    mapping(address => PartnerInfo) public partners;
+    
+    uint256 public constant TIER_1_STAKE = 100_000 * 1e18;
+    uint256 public constant TIER_2_STAKE = 500_000 * 1e18;
+    uint256 public constant TIER_3_STAKE = 2_000_000 * 1e18;
+    
+    uint256 public constant UNBONDING_PERIOD = 30 days;
+    
+    event PartnerStaked(address indexed partner, Tier tier);
+    event PartnerUnstaked(address indexed partner);
+    event PartnerSlashed(address indexed partner, uint256 amount);
+    
+    constructor(address _alpha) {
+        ALPHA = IERC20(_alpha);
+    }
+    
+    function stake(Tier tier) external {
+        uint256 amount = _tierToAmount(tier);
+        ALPHA.transferFrom(msg.sender, address(this), amount);
+        partners[msg.sender] = PartnerInfo({
+            tier: tier,
+            stakeAmount: amount,
+            stakedAt: block.timestamp,
+            slashed: false
+        });
+        emit PartnerStaked(msg.sender, tier);
+    }
+    
+    function unstake() external {
+        PartnerInfo storage info = partners[msg.sender];
+        require(info.tier != Tier.NONE, "Not staked");
+        require(block.timestamp >= info.stakedAt + UNBONDING_PERIOD, "Unbonding period");
+        require(!info.slashed, "Slashed");
+        
+        ALPHA.transfer(msg.sender, info.stakeAmount);
+        delete partners[msg.sender];
+        emit PartnerUnstaked(msg.sender);
+    }
+    
+    function getTier(address partner) external view returns (Tier) {
+        return partners[partner].tier;
+    }
+    
+    function slash(address partner, uint256 amount) external {
+        // Only governance
+        PartnerInfo storage info = partners[partner];
+        info.slashed = true;
+        ALPHA.transfer(governanceTreasury, amount);
+        emit PartnerSlashed(partner, amount);
+    }
+}
+```
+
 ---
 
 ## 8. MCP Protocol
@@ -1708,9 +1993,9 @@ scipy==1.12.0
 
 ---
 
-## 10. Operational Infrastructure
+# 10. Operational Infrastructure
 
-### Validator Queue Management
+## 10.1 Validator Queue Management
 
 ```python
 # carbon/validator/queue.py
@@ -1813,68 +2098,629 @@ volumes:
 
 ---
 
-## Summary: File Organization
+# 11. Julia/SciML Ground Truth Service
+
+## 11.1 Overview
+
+The **Julia/SciML Ground Truth Service** is Carbon's "mathematical oracle" — a dedicated Julia service that provides mathematically rigorous reference solutions, adjoint sensitivities, and symbolic loss terms using the world-class Julia SciML ecosystem. This service is the **ground truth oracle** that makes Carbon's verification *trustless in the mathematical sense*.
+
+### Architecture
 
 ```
-carbon/
-├── validator/
-│   ├── main.py                 # Entry point
-│   ├── training.py             # lax.scan training loop + early stopping
-│   ├── training_phase3.py      # Gradient accumulation + checkpointing
-│   ├── losses.py               # unified_loss_fn (boolean masking)
-│   ├── physics_gates.py        # 15+ gates (fp32 enforced)
-│   ├── monitoring.py           # Online residual monitoring
-│   ├── scorer.py               # CarbonScorer (45/30/25)
-│   ├── queue.py                # ValidatorQueue (priority + timeouts)
-│   └── monitoring.py           # Online residual monitoring
-├── generators/
-│   ├── base.py                 # ProceduralGenerator ABC
-│   ├── poisson.py              # JAX-FEM
-│   ├── compressible_ns.py      # Hybrid (mesh online, solutions cached)
-│   ├── reacting_ns.py          # Precomputed (DPLR/US3D cache)
-│   ├── fsi.py                  # Sequential + coupled (preCICE)
-│   ├── stress.py               # StressGenerator (9 categories)
-│   └── resolution.py           # Multi-fidelity downsampling
-├── backbones/
-│   ├── registry.py             # BACKBONE_REGISTRY (FNO, GINO, WNO, Transolver)
-│   ├── fno.py                  # SpectralConv + InstanceNorm
-│   ├── gino.py                 # Message passing
-│   ├── wno.py                  # Wavelet layers
-│   ├── transolver.py           # Attention-based
-│   ├── precision.py            # bfloat16 + fp32 physics gates context
-│   └── checkpointing.py        # Gradient checkpointing policies
-├── landscape/
-│   ├── pipeline.py             # LandscapeAgent (PySR + MT + DML)
-│   ├── pysr_config.py          # PySR configuration
-│   └── bridge.jl               # ModelingToolkit.jl bridge
-├── miner/
-│   ├── cli.py                  # carbon-miner CLI
-│   ├── sdk.py                  # CarbonMiner / AsyncCarbonMiner
-│   ├── estimator.py            # EstimationEngine (linear sensitivity + proxy)
-│   ├── cost_estimator.py       # Provider rate tables
-│   └── airgapped.py            # AirgappedMinerToolkit (IL5/IL6)
-├── challenges/
-│   └── factory.py              # generate_challenge() + create_sponsored_challenge()
-├── mcp/
-│   └── protocol.py             # MCPClient / MCPServer (WebSocket)
-├── landscape/
-│   ├── pipeline.py             # LandscapeAgent (PySR + MT + DML)
-│   ├── pysr_config.py          # PySR configuration
-│   └── bridge.jl               # ModelingToolkit.jl bridge
-├── common/
-│   ├── determinism.py          # set_global_determinism + verify_reproducibility
-│   ├── seeding.py              # Hierarchical seed derivation
-│   └── reproducibility.py      # Verification harness
-├── contracts/
-│   ├── CarbonTreasury.sol
-│   ├── BountyPool.sol
-│   ├── VerificationRegistry.sol
-│   ├── VerificationGas.sol
-│   └── PartnerStaking.sol
-└── common/
-    └── determinism.py          # set_global_determinism + verify_reproducibility
+┌─────────────────────────────────────────────────────────────────┐
+│                    CARBON VALIDATOR                              │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  PYTHON/JAX VALIDATOR                                       │ │
+│  │  ├─ Training Loop (JAX/Flax)                                │ │
+│  │  ├─ Physics Gates (fp32 enforced)                           │ │
+│  │  └─ SciMLClient ─────────────────────────────────────────┐  │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  JULIA/SCIML GROUND TRUTH SERVICE (Port 8083)              │ │
+│  │  ├─ DifferentialEquations.jl (Reference Solvers)           │ │
+│  │  ├─ NeuralPDE.jl (PINN Baselines)                          │ │
+│  │  ├─ ModelingToolkit.jl (Symbolic Loss Terms)               │ │
+│  │  ├─ SciMLSensitivity.jl (Adjoint Sensitivities)            │ │
+│  │  ├─ NeuralPDE.jl (PINN/DeepONet Baselines)                 │ │
+│  │  └─ MethodOfLines.jl (Automated PDE Discretization)        │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-This implementation document contains all the build-level details needed for Harshdeep to implement the Carbon subnet. Every component is specified with exact JAX patterns, physics gate implementations, generator architectures, training loops, precision policies, contracts, and operational infrastructure.
+## 11.2 Julia/SciML Service Implementation
+
+### 11.2.1 Julia Service Implementation
+
+```julia
+# julia/sciML_service.jl
+using HTTP, JSON3, Sockets
+using DifferentialEquations, NeuralPDE, ModelingToolkit, SciMLSensitivity
+using MethodOfLines, NeuralPDE, SciMLSensitivity, ModelingToolkit
+
+struct SciMLService
+    port::Int
+    server::HTTP.Server
+end
+
+function SciMLService(port::Int=8083)
+    server = HTTP.Servers.listen(Sockets.localhost, port) do http::HTTP.Messages.Request
+        request = JSON3.read(String(http.body))
+        response = handle_request(request)
+        return HTTP.Response(200, JSON3.write(response))
+    end
+    SciMLService(port, server)
+end
+
+function handle_request(request::Dict)
+    action = get(request, "action", "")
+    
+    if action == "solve_pde"
+        return solve_pde_reference(request["pde_spec"], request["params"])
+    elseif action == "adjoint_sensitivity"
+        return compute_adjoint_sensitivity(request)
+    elseif action == "symbolic_loss"
+        return generate_symbolic_loss(request)
+    elseif action == "validate_solution"
+        return validate_against_reference(request)
+    else
+        return Dict("error" => "Unknown action: $action")
+    end
+end
+
+function solve_pde_reference(pde_spec::Dict, params::Dict)
+    # Parse PDE spec from ModelingToolkit
+    @variables t x y z
+    @parameters p[1:length(params)]
+    
+    # Build PDE system from symbolic spec
+    eqs = build_pde_system(pde_spec, params)
+    
+    # Solve with high-accuracy solver
+    prob = ODEProblem(eqs, u0, tspan, params)
+    sol = solve(prob, Vern9(), abstol=1e-12, reltol=1e-12, saveat=0.01)
+    
+    return Dict(
+        "solution" => Array(sol),
+        "times" => sol.t,
+        "success" => true
+    )
+end
+
+function compute_adjoint_sensitivity(request::Dict)
+    # SciMLSensitivity.jl for adjoint computation
+    # Used for Carbon's Adjoint Consistency Gate (Phase 1A+)
+    u0 = request["initial_state"]
+    params = request["params"]
+    loss_fn = request["loss_function"]
+    
+    # Forward pass
+    prob = ODEProblem(ode_fn, u0, tspan, params)
+    sol = solve(prob, Tsit5(), saveat=0.01)
+    
+    # Adjoint sensitivity via SciMLSensitivity
+    adj_sol = adjoint_sensitivities(sol, loss_fn, 
+        alg=InterpolatingAdjoint(autojacvec=ReverseDiffVJP()))
+    
+    return Dict("adjoint_gradients" => Array(adj_sol))
+end
+
+function generate_symbolic_loss(request::Dict)
+    # ModelingToolkit.jl symbolic loss generation
+    # Used by Landscape Agent bridge
+    symbolic_expr = request["symbolic_expression"]
+    vars = request["variables"]
+    
+    @variables vars...
+    expr = Meta.parse(symbolic_expr)
+    loss_fn = build_function(expr, vars)
+    
+    return Dict(
+        "julia_code" => string(loss_fn),
+        "jax_translation" => translate_to_jax(loss_fn)
+    )
+end
+
+function validate_against_reference(request::Dict)
+    # Validate model prediction against SciML reference solution
+    model_prediction = request["model_prediction"]
+    pde_spec = request["pde_spec"]
+    params = request["params"]
+    
+    reference = solve_pde_reference(pde_spec, params)
+    
+    # Compute error metrics
+    error_metrics = compute_error_metrics(model_prediction, reference["solution"])
+    
+    return Dict(
+        "passes" => all(v < 1e-3 for v in error_metrics.values()),
+        "error_metrics" => error_metrics,
+        "reference_solution" => reference
+    )
+end
+```
+
+### 11.2.2 Python SciML Client
+
+```python
+# carbon/sciml/client.py
+import httpx
+import asyncio
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
+from jaxtyping import Array
+
+@dataclass
+class SciMLClient:
+    """Async client for Julia SciML Ground Truth Service"""
+    base_url: str = "http://localhost:8083"
+    timeout: float = 300.0  # 5 min for complex PDE solves
+    
+    def __init__(self, base_url: str = "http://localhost:8083"):
+        self.base_url = base_url
+        self.client = httpx.AsyncClient(timeout=self.timeout)
+    
+    async def solve_pde_reference(self, pde_spec: Dict, params: Dict) -> Dict:
+        """Get high-fidelity reference solution from Julia/SciML."""
+        response = await self.client.post(
+            f"{self.base_url}/solve_pde",
+            json={"action": "solve_pde", "pde_spec": pde_spec, "params": params}
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def compute_adjoint_sensitivity(self, 
+        initial_state: Array, 
+        params: Dict, 
+        loss_fn: str) -> Dict:
+        """Compute adjoint gradients via SciMLSensitivity.jl."""
+        response = await self.client.post(
+            f"{self.base_url}/adjoint",
+            json={
+                "action": "adjoint_sensitivity",
+                "initial_state": initial_state.tolist(),
+                "params": params,
+                "loss_function": loss_fn
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def generate_symbolic_loss(self, 
+        symbolic_expression: str, 
+        variables: list) -> Dict:
+        """Get symbolic loss term from ModelingToolkit.jl."""
+        response = await self.client.post(
+            f"{self.base_url}/symbolic_loss",
+            json={
+                "action": "symbolic_loss",
+                "symbolic_expression": symbolic_expression,
+                "variables": variables
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def validate_against_reference(self, 
+        model_prediction: Array, 
+        pde_spec: Dict, 
+        params: Dict) -> Dict:
+        """Validate model against SciML reference solution."""
+        response = await self.client.post(
+            f"{self.base_url}/validate",
+            json={
+                "action": "validate_solution",
+                "model_prediction": model_prediction.tolist(),
+                "pde_spec": pde_spec,
+                "params": params
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+```
+
+### Validator Integration with SciML Client
+
+```python
+# carbon/validator/training.py (extended)
+
+class ValidatorTrainer:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.checkpointer = ocp.StandardCheckpointer()
+        self.sciml_client = SciMLClient()  # Julia/SciML bridge
+    
+    async def _sciml_validation(self, state: TrainState, strategy: Dict) -> Dict:
+        """Validate trained model against Julia/SciML Ground Truth Oracle."""
+        challenge_id = strategy["challenge_id"]
+        challenge_spec = self.get_challenge_spec(challenge_id)
+        
+        # Get reference solution from Julia/SciML Ground Truth Oracle
+        reference = await self.sciml_client.solve_pde_reference(
+            pde_spec=challenge_spec.pde_spec,
+            params=strategy.get("pde_params", {})
+        )
+        
+        # Evaluate model on reference grid
+        model_prediction = self._evaluate_on_grid(state.params, reference["coords"])
+        
+        # Compute error metrics
+        error_metrics = self._compute_error_metrics(model_prediction, reference["solution"])
+        
+        return {
+            "passes": all(v < 1e-3 for v in error_metrics.values()),
+            "error_metrics": error_metrics,
+            "reference_solution": reference
+        }
+    
+    def _run_physics_gates(self, state: TrainState) -> List[GateResult]:
+        """Run physics gates with SciML validation for adjoint gate."""
+        # Standard gates
+        gate_results = run_all_gates(
+            model_fn=self.model_apply_fn,
+            challenge=self.current_challenge,
+            params=state.params,
+            stress_data=self.stress_data,
+            generator_version=self.generator_version
+        )
+        
+        # Adjoint Consistency Gate via SciMLSensitivity.jl (Phase 1A+)
+        if self.config.get("adjoint_consistency_gate", False):
+            adjoint_result = await self.sciml_client.compute_adjoint_sensitivity(
+                model_fn=self.model_apply_fn,
+                params=state.params,
+                loss_fn="physics_residual"
+            )
+            gate_results.append(GateResult(
+                gate_id="adjoint_consistency",
+                threshold=1e-4,
+                result=adjoint_result["rel_error"],
+                status="PASS" if adjoint_result["rel_error"] < 1e-4 else "FAIL"
+            ))
+        
+        return gate_results
+```
+
+---
+
+## 12. Python-Julia Bridge (SciMLClient)
+
+### 12.1 Complete Client Implementation
+
+```python
+# carbon/sciml/client.py
+import httpx
+import asyncio
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
+from jaxtyping import Array
+import asyncio
+
+@dataclass
+class SciMLClient:
+    """Async client for Julia SciML Ground Truth Service"""
+    base_url: str = "http://localhost:8083"
+    timeout: float = 300.0  # 5 min for complex PDE solves
+    
+    def __init__(self, base_url: str = "http://localhost:8083"):
+        self.base_url = base_url
+        self.client = httpx.AsyncClient(timeout=self.timeout)
+    
+    async def solve_pde_reference(self, pde_spec: Dict, params: Dict) -> Dict:
+        """Get high-fidelity reference solution from Julia/SciML."""
+        response = await self.client.post(
+            f"{self.base_url}/solve_pde",
+            json={"action": "solve_pde", "pde_spec": pde_spec, "params": params}
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def compute_adjoint_sensitivity(self, 
+        initial_state: Array, 
+        params: Dict, 
+        loss_fn: str) -> Dict:
+        """Compute adjoint gradients via SciMLSensitivity.jl."""
+        response = await self.client.post(
+            f"{self.base_url}/adjoint",
+            json={
+                "action": "adjoint_sensitivity",
+                "initial_state": initial_state.tolist(),
+                "params": params,
+                "loss_function": loss_fn
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def generate_symbolic_loss(self, 
+        symbolic_expression: str, 
+        variables: list) -> Dict:
+        """Get symbolic loss term from ModelingToolkit.jl."""
+        response = await self.client.post(
+            f"{self.base_url}/symbolic_loss",
+            json={
+                "action": "symbolic_loss",
+                "symbolic_expression": symbolic_expression,
+                "variables": variables
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def validate_against_reference(self, 
+        model_prediction: Array, 
+        pde_spec: Dict, 
+        params: Dict) -> Dict:
+        """Validate model against SciML reference solution."""
+        response = await self.client.post(
+            f"{self.base_url}/validate",
+            json={
+                "action": "validate_solution",
+                "model_prediction": model_prediction.tolist(),
+                "pde_spec": pde_spec,
+                "params": params
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    async def close(self):
+        await self.client.aclose()
+
+# Context manager for easy usage
+async def get_sciml_client() -> SciMLClient:
+    client = SciMLClient()
+    try:
+        yield client
+    finally:
+        await client.close()
+```
+
+### 12.2 SciML Validation Mixin for Validators
+
+```python
+# carbon/validator/sciml_validation.py
+
+class SciMLValidationMixin:
+    """Mixin for Validator to use SciML reference solutions"""
+    
+    def __init__(self):
+        self.sciml_client = SciMLClient()
+    
+    async def validate_against_sci_ml(self, 
+        model_fn: Callable, 
+        challenge_id: str, 
+        params: Dict) -> Dict:
+        """Validate model against SciML reference solution."""
+        
+        # Get challenge spec for PDE definition
+        challenge_spec = self.get_challenge_spec(challenge_id)
+        
+        # Get reference solution from Julia/SciML
+        reference = await self.sciml_client.solve_pde_reference(
+            pde_spec=challenge_spec.pde_spec,
+            params=params
+        )
+        
+        # Evaluate model on same grid
+        model_prediction = self._evaluate_on_grid(model_fn, reference["coords"])
+        
+        # Compute error metrics
+        error_metrics = self._compute_error_metrics(model_prediction, reference["solution"])
+        
+        return {
+            "passes": all(v < 1e-3 for v in error_metrics.values()),
+            "error_metrics": error_metrics,
+            "reference_solution": reference
+        }
+```
+
+---
+
+## 13. Julia/SciML Service Deployment
+
+### 13.1 Dockerfile for Julia Service
+
+```dockerfile
+# julia/Dockerfile.sciml
+FROM julia:1.10-bullseye
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip curl git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Julia packages
+RUN julia --project -e '
+    using Pkg
+    Pkg.add([
+        "DifferentialEquations", "NeuralPDE", "ModelingToolkit",
+        "SciMLSensitivity", "MethodOfLines", "NeuralPDE",
+        "Symbolics", "Optimization", "OptimizationOptimisers",
+        "HTTP", "JSON3", "Sockets", "CUDA"
+    )
+    Pkg.precompile()
+'
+
+# Install Python for Carbon integration
+RUN pip install httpx numpy jax jaxlib
+
+# Copy Julia service
+COPY julia/sciML_service.jl /app/sciML_service.jl
+COPY julia/start_server.jl /app/start_server.jl
+
+EXPOSE 8083
+CMD ["julia", "--project", "/app/start_server.jl"]
+```
+
+### 13.2 Julia Server Entry Point
+
+```julia
+# julia/start_server.jl
+using HTTP, JSON3, Sockets
+using DifferentialEquations, NeuralPDE, ModelingToolkit, SciMLSensitivity
+using MethodOfLines, NeuralPDE, SciMLSensitivity, ModelingToolkit
+
+const PORT = 8083
+
+function start_server()
+    HTTP.serve(Sockets.localhost, PORT) do http::HTTP.Messages.Request
+        try
+            request = JSON3.read(String(http.body))
+            response = handle_request(request)
+            return HTTP.Response(200, JSON3.write(response))
+        catch e
+            @error "Request failed" exception=e
+            return HTTP.Response(500, JSON3.write(Dict("error" => string(e))))
+        end
+    end
+end
+
+# Handle graceful shutdown
+atexit(() -> println("SciML Service shutting down..."))
+
+println("Starting SciML Ground Truth Service on port $PORT...")
+start_server()
+```
+
+### 13.3 K8s Deployment
+
+```yaml
+# k8s/sciml-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carbon-sciml-service
+  namespace: carbon
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: carbon-sciml
+  template:
+    metadata:
+      labels:
+        app: carbon-sciml
+    spec:
+      runtimeClassName: nvidia
+      containers:
+      - name: sciml-service
+        image: ghcr.io/carbon/sciml-service:v2.1.0
+        ports:
+        - containerPort: 8083
+        env:
+        - name: JULIA_NUM_THREADS
+          value: "16"
+        - name: JULIA_DEPOT_PATH
+          value: "/opt/julia/depot"
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: "32Gi"
+            cpu: "8"
+          limits:
+            nvidia.com/gpu: 1
+            memory: "64Gi"
+            cpu: "16"
+        volumeMounts:
+        - name: julia-depot
+          mountPath: /opt/julia/depot
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: julia-depot
+        persistentVolumeClaim:
+          claimName: carbon-julia-depot
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: carbon-sciml
+  namespace: carbon
+spec:
+  selector:
+    app: carbon-sciml
+  ports:
+  - protocol: TCP
+    port: 8083
+    targetPort: 8083
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: carbon-julia-depot
+  namespace: carbon
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: nvme-fast
+```
+
+### 13.4 Docker Compose for Local Development
+
+```yaml
+# docker-compose.sciml.yml
+version: '3.8'
+services:
+  sciml-service:
+    build:
+      context: ./julia
+      dockerfile: Dockerfile.sciml
+    container_name: carbon-sciml
+    ports:
+      - "8083:8083"
+    environment:
+      - JULIA_NUM_THREADS=16
+      - JULIA_DEPOT_PATH=/opt/julia/depot
+    volumes:
+      - sciml-depot:/opt/julia/depot
+      - ./julia:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  sciml-depot:
+```
+
+---
+
+## Summary: Integration Complete
+
+The Carbon specification now fully integrates the **Julia/SciML Ground Truth Oracle** as the mathematical backbone of the subnet. Every physics gate, generator validation, and landscape agent operation can now leverage the world's most rigorous scientific computing stack.
+
+**Key Integration Points:**
+1. **Physics Gates** → Adjoint Consistency Gate via `SciMLSensitivity.jl`
+2. **Generators** → Validated against `DifferentialEquations.jl` reference solutions
+3. **Landscape Agent** → `ModelingToolkit.jl` bridge for symbolic loss terms
+4. **Validators** → `SciMLClient` for reference solution validation
+5. **Landscape Agent** → `ModelingToolkit.jl` bridge for symbolic loss terms
+5. **Adjoint Consistency Gate** → `SciMLSensitivity.jl` via Julia bridge
+
+**The Ground Truth Oracle is now the mathematical backbone of Carbon's trustless verification.**
