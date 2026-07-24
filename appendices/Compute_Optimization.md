@@ -1,8 +1,11 @@
+# Updated Document 1: Compute Optimization Strategy (Optimized)
+
+```markdown
 # Compute Optimization Strategy for Carbon
 
 **Carbon PDE Subnet**  
 **Technical Analysis Document**  
-**Version:** 1.0 (July 2026)  
+**Version:** 2.0 (July 2026)  
 **Status:** Core Engineering & Strategy Appendix
 
 This document provides a rigorous, system-level analysis of compute efficiency as a limiting factor for the Carbon subnet. It examines where computational cost actually arises in Neural Operator training, evaluates kernel-level and algorithmic strategies for reducing that cost, and analyzes how those strategies interact with validator economics, miner incentives, model quality, and long-term commercial value.
@@ -13,7 +16,7 @@ Carbon treats compute efficiency as a first-class design concern. The goal is no
 
 ## 1. Motivation & Problem Statement
 
-High-fidelity Neural Operator training is expensive. As Carbon progresses from academic PDEs through compressible flow, reacting flows, multi-physics coupling, and 3D turbulence, the computational cost per official evaluation rises sharply. Without deliberate efficiency mechanisms, validator throughput becomes the binding constraint on the subnet’s ability to explore strategy space in parallel — the core structural advantage of a decentralized approach.
+High-fidelity Neural Operator training is expensive. As Carbon progresses from academic PDEs through compressible flow, reacting flows, multi-physics coupling, and 3D turbulence, the computational cost per official evaluation rises sharply. Without deliberate efficiency mechanisms, validator throughput becomes the binding constraint on the subnet's ability to explore strategy space in parallel — the core structural advantage of a decentralized approach.
 
 Three pressures make this limiting factor acute:
 
@@ -21,7 +24,7 @@ Three pressures make this limiting factor acute:
 2. **Search capacity** — The number of strategies that can be rigorously evaluated per unit time directly determines how fast superior training methodologies can be discovered.
 3. **Commercial viability** — Sponsored Challenges and Specialist Bank offerings become more attractive when the cost of producing high-quality, verified models is lower.
 
-Carbon’s response is multi-layered: kernel-level optimizations, miner-expressible algorithmic strategies, and system-level evaluation controls that concentrate expensive compute on the submissions that matter most.
+Carbon's response is multi-layered: kernel-level optimizations, miner-expressible algorithmic strategies, and system-level evaluation controls that concentrate expensive compute on the submissions that matter most.
 
 ---
 
@@ -134,6 +137,7 @@ These strategies can be expressed in `strategy.json` and are therefore discovera
 | Low-rank adapters (LoRA) on strong priors | Large wall-clock reduction | High when priors are strong | Phase 2A+ capability |
 | Physics-parameter + resolution co-curriculum | 1.5–3× | Often positive | Under-explored discovery surface |
 | Progressive residual point sampling | 1.3–2× | Neutral to positive | Reduces residual evaluation cost |
+| **Gradient accumulation + checkpointing (Phase 3-4)** | **30-50% VRAM reduction** | Neutral | **Essential for Phase 3-4** |
 
 **Key Observation**  
 In practice, the combination of multi-fidelity curricula, early stopping, and low-rank kernels consistently outperforms pure kernel optimization in isolation. Kernel improvements amplify good algorithmic strategies; they do not replace them.
@@ -162,9 +166,72 @@ Sponsors of Challenges (particularly Tier 3 and Tier 4) can purchase additional 
 
 Each challenge carries a total GPU-second budget per tempo. Individual hotkeys have submission quotas. These controls prevent any single challenge or miner from starving the network and force prioritization toward higher-value work.
 
-### 5.5 Pre-qualification via Estimation / Light Training
+### 5.4 Pre-qualification via Estimation / Light Training
 
 Priority (or a soft requirement) can be given to submissions that have already demonstrated promise under Estimation Mode or Light Training. This filters pure speculative submissions before they enter the expensive full-evaluation queue, while reinforcing the low-friction iteration loop the subnet wants miners and agents to use.
+
+### 5.5 Validator Queue Management & Prioritization
+
+```python
+# carbon/validator/queue.py
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+import time
+import heapq
+
+class Priority(Enum):
+    SPONSORED_TIER_4 = 0      # Highest: paid priority
+    SPONSORED_TIER_3 = 1
+    SPONSORED_TIER_2 = 2
+    HIGH_REPUTATION = 3       # Reputation > threshold
+    STANDARD = 4              # Normal submissions
+    ESTIMATION_MODE = 5       # Lowest priority
+
+@dataclass
+class QueuedSubmission:
+    priority: Priority
+    submit_time: float
+    hotkey: str
+    challenge_id: str
+    strategy_hash: str
+    estimated_gpu_seconds: float
+    
+    def __lt__(self, other):
+        # Priority queue: lower priority value = higher priority
+        if self.priority != other.priority:
+            return self.priority.value < other.priority.value
+        return self.submit_time < other.submit_time
+
+class ValidatorQueue:
+    def __init__(self, max_concurrent: int = 3, max_queue_depth: int = 100):
+        self.max_concurrent = max_concurrent
+        self.max_queue_depth = max_queue_depth
+        self.pending: list = []
+        self.active: dict = {}  # submission_id -> submission
+        self.completed_recently: set = set()
+    
+    def enqueue(self, submission: QueuedSubmission) -> bool:
+        if len(self.pending) >= self.max_queue_depth:
+            return False  # Queue full
+        heapq.heappush(self.pending, submission)
+        return True
+    
+    def pop_next(self) -> Optional[QueuedSubmission]:
+        if not self.pending:
+            return None
+        return heapq.heappop(self.pending)
+    
+    def get_queue_status(self) -> dict:
+        return {
+            "pending_count": len(self.pending),
+            "active_count": len(self.active),
+            "by_priority": {
+                p.name: sum(1 for s in self.pending if s.priority == p)
+                for p in Priority
+            }
+        }
+```
 
 ---
 
@@ -184,7 +251,7 @@ Efficiency mechanisms must not create paths for physically invalid models to rea
 
 ---
 
-## 7. Priority Matrix
+## 7. Priority Matrix (Updated)
 
 | Strategy | Impact | Difficulty | Primary Side | Priority |
 |----------|--------|------------|--------------|----------|
@@ -194,6 +261,7 @@ Efficiency mechanisms must not create paths for physically invalid models to rea
 | Adaptive mode schedules | High | Medium | Miner-expressible | High |
 | Reputation- / stake-weighted evaluation depth | High | Medium | System | High |
 | Progressive multi-stage evaluation | High | Medium | System | High |
+| **Gradient accumulation + checkpointing (Phase 3-4)** | **Very High** | **Medium** | **Both** | **Highest (Ph 3+)** |
 | Fused Triton spectral kernels | Medium–High | Medium | Validator | Medium–High |
 | Continuous (SIREN-style) kernels | Medium–High | Medium–High | Both | Medium |
 | Sponsored evaluation capacity | Medium–High | Low–Medium | System / Commercial | Medium–High |
@@ -202,28 +270,30 @@ Efficiency mechanisms must not create paths for physically invalid models to rea
 
 ---
 
-## 8. Recommended Strategic Posture
+## 8. Recommended Strategic Posture (Updated)
 
 Carbon should treat compute efficiency as a searchable dimension of the problem the network is solving, not merely as a one-time systems optimization.
 
 **Core principles:**
 
-1. Expose efficiency knobs (rank, mode budget, resolution schedule, etc.) in `strategy.json` so the network can discover effective combinations.
+1. Expose efficiency knobs (rank, mode budget, resolution schedule, gradient accumulation steps, checkpointing) in `strategy.json` so the network can discover effective combinations.
 2. Implement targeted, high-ROI kernel improvements on the validator side to lower the cost of evaluating those strategies.
 3. Maintain strong physics gates and progressive evaluation so that efficiency gains cannot be used to bypass physical validity.
 4. Allow the Landscape Agent to learn which efficiency choices causally improve robustness and generalization, not merely training speed.
 5. Align commercial mechanisms (sponsored evaluation capacity) with the actual cost of rigorous verification.
+6. **Hardware-aware phase budgeting**: Phase 3-4 budgets include 2-3× safety margins for coupling overhead and multi-GPU scaling inefficiency.
 
-This posture expands parallel search capacity, improves the quality–cost frontier of the Specialist Bank, and strengthens the economic sustainability of the subnet as problem complexity grows — without compromising the scientific rigor that underpins Carbon’s credibility.
+This posture expands parallel search capacity, improves the quality–cost frontier of the Specialist Bank, and strengthens the economic sustainability of the subnet as problem complexity grows — without compromising the scientific rigor that underpins Carbon's credibility.
 
 ---
 
 ## 9. Relationship to Other Documents
 
-- `appendices/JAX_Optimization.md` — Detailed implementation designs for unified loss masking, early-stopping via `lax.scan`, bfloat16 policy, multi-fidelity resolution handling, and `vmap` cohorting.
+- `appendices/JAX_Optimization.md` — Detailed implementation designs for unified loss masking, early-stopping via `lax.scan`, bfloat16 policy, multi-fidelity resolution handling, `vmap` cohorting, gradient accumulation, gradient checkpointing, and `vmap` cohorting.
 - Main `SPEC.md` — Phase roadmap, physics gates, scoring, and trustless verification requirements that any efficiency mechanism must respect.
 - `TRUSTLESS_VERIFICATION_AND_DATA_GENERATION.md` — Constraints on reproducibility and auditability that custom kernels and evaluation-depth policies must satisfy.
 
 ---
 
 *This document is intended as a living technical analysis. Cost models, kernel performance numbers, and priority rankings should be updated as empirical measurements from the running subnet become available.*
+```
