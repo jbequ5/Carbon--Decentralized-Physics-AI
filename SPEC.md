@@ -1,4 +1,4 @@
-# Carbon Physics Intelligence Subnet
+# Carbon -- A Physics Intelligence Subnet
 
 ---
 
@@ -57,6 +57,14 @@ Carbon is a Bittensor subnet that operates a **decentralized verification layer 
 │  ├─ Online physics residual monitoring (adaptive loss re-weight)│
 │  └─ Model Card generation (full provenance + diagnostics)      │
 ├─────────────────────────────────────────────────────────────────┤
+│  GROUND TRUTH ORACLE (Julia/SciML Service)                     │
+│  ├─ DifferentialEquations.jl (Reference Solvers)               │
+│  ├─ NeuralPDE.jl (PINN Baselines)                              │
+│  ├─ ModelingToolkit.jl (Symbolic Loss Terms)                   │
+│  ├─ SciMLSensitivity.jl (Adjoint Sensitivities)                │
+│  ├─ NeuralPDE.jl (PINN/DeepONet Baselines)                     │
+│  └─ MethodOfLines.jl (Automated PDE Discretization)           │
+├─────────────────────────────────────────────────────────────────┤
 │  LANDSCAPE AGENT (Compounding Intelligence)                     │
 │  ├─ Symbolic extraction (PySR → ModelingToolkit.jl losses)     │
 │  ├─ Causal analysis (Double ML for strategy → outcome)         │
@@ -81,8 +89,11 @@ Carbon is a Bittensor subnet that operates a **decentralized verification layer 
 - **Procedural generation at runtime**: All evaluation data (stress testing and benchmark/held-out) is generated at runtime using open-source generators.
 - **Public unpredictable seeding**: Generation seeded by `hash(challenge_id + block_hash + run_nonce)` (Phase 0); moving toward commit-reveal + drand in Phase 1B+.
 - **Auditable by anyone**: Generator code is open-source; anyone can reproduce evaluation data given the seed.
-- **Scientific credibility**: Generator parameter ranges have documented physical justification; validated against high-fidelity reference solvers (FEniCS, OpenFOAM, SU2, DPLR, US3D).
+- **Scientific credibility**: Generator parameter ranges have documented physical justification; validated against high-fidelity reference solvers (FEniCS, OpenFOAM, SU2, DPLR, US3D, **DifferentialEquations.jl**).
 - **No fixed reference datasets**: Primary evaluation data is procedurally generated to preserve trustlessness; fixed datasets used only for generator validation.
+- **Ground Truth Oracle**: **Julia/SciML Service** provides mathematically rigorous reference solutions via DifferentialEquations.jl, adjoint sensitivities via SciMLSensitivity.jl, and symbolic loss terms via ModelingToolkit.jl.
+
+See `TRUSTLESS_VERIFICATION_AND_DATA_GENERATION.md` for the full design, including the Proprietary Data Handling Plan (Section 8).
 
 ---
 
@@ -118,6 +129,7 @@ Carbon operates a **Dual-Regime Model Supply** for defense and regulated domains
 - **Phase 2A**: Customer-controlled local fine-tuning with custom datasets (Abaqus ODB). Raw data never leaves customer control.
 - **Phase 2B**: Air-Gapped Miner Toolkit v1 for classified enclaves (IL5/IL6). Zero network dependencies.
 - **Phase 3+**: Confidential Computing (NVIDIA H100 TEEs) on validator side for sensitive workloads.
+- **Julia/SciML Service**: Deployable in both regimes (air-gapped Julia deployment for classified regime).
 
 ---
 
@@ -171,7 +183,7 @@ This separation preserves adversarial integrity: miners optimize for training di
 
 | Transition | Entry Gate (ALL Required) | Meaning |
 |------------|---------------------------|---------|
-| **0 → 1A** | 5 validators (99% uptime), 7 PDEs mesh-converged vs FEniCS, 3 backbones, Model Zoo v1 live, 3 pilot subscribers | Subnet operational — verification layer live |
+| **0 → 1A** | 5 validators (99% uptime), 7 PDEs mesh-converged vs FEniCS/DifferentialEquations.jl, 3 backbones, Model Zoo v1 live, 3 pilot subscribers | Subnet operational — verification layer live |
 | **1A → 1B** | 2 defense benchmarks mesh-converged + turb UQ, Factory v1 live, 1+ Tier 2 LOI, Turbulence UQ framework | Compressible flow verified — Factory revenue live |
 | **1B → 2A** | 4 defense benchmarks (turb UQ + chem UQ), Factory hardened (2 T2 LOIs, 1 T3 LOI), Prime teaming, SBIR I submitted | Defense breadth + Factory hardened — SBIR pipeline live |
 | **2A → 2B** | Schema v1.1 live (LoRA + Custom Data + MT Losses), Specialist Bank v1 (20+ components), DML flowing (3 effects), 10 Tier 1 subs | Customization + Intelligence live — Deep customization revenue |
@@ -211,7 +223,7 @@ This separation preserves adversarial integrity: miners optimize for training di
 | 6 | Linear Elasticity | 2D | Vector mechanics, equilibrium |
 | 7 | Thermo-Elasticity | 2D | Coupled thermal-mechanical |
 
-**Mesh/Temporal Convergence Required**: 3-level h-refinement (h, h/2, h/4), 3-level dt-refinement; L2 tolerance 1.0%/0.5%; validated vs FEniCS/OpenFOAM (20 cases, 2% tolerance).
+**Mesh/Temporal Convergence Required**: 3-level h-refinement (h, h/2, h/4), 3-level dt-refinement; L2 tolerance 1.0%/0.5%; validated vs FEniCS/DifferentialEquations.jl (20 cases, 2% tolerance).
 
 ### Phase 1A: Compressible Flow (+2 Defense Benchmarks)
 
@@ -258,7 +270,7 @@ This separation preserves adversarial integrity: miners optimize for training di
 ### Phase 3: Multi-Physics Coupling (Composite v2.0 Schema)
 
 | ID | Challenge | Physics | Coupling |
-|----|-----------|---------|-----------|
+|----|-----------|---------|----------|
 | 14 | FSI (Turek/Hron 3D) | NS + Nonlinear Elasticity | preCICE implicit |
 | 15 | CHT (Conjugate HT) | NS + Heat (solid) | preCICE explicit |
 | 17 | Thermo-Elasticity 3D | NS + Heat + Elasticity | preCICE multi-field |
@@ -329,7 +341,7 @@ This separation preserves adversarial integrity: miners optimize for training di
 | Boundary Satisfaction | 0+ | 1e-4 Linf | + catalytic wall (1B+) |
 | Rollout Stability | 0+ | 10k steps, 1% perturb | Lyapunov < 0 |
 | UQ Calibration | 0+ | Conformal 95% | Split conformal, 500 pts |
-| Adjoint Consistency | 1A+ | 1e-4 rel error | Optimization-grade surrogates |
+| Adjoint Consistency | 1A+ | 1e-4 rel error | **SciMLSensitivity.jl** adjoint check |
 | Shock Capture | 1A+ | Δx/shock_thickness < 0.1 | Resolution-based |
 | Turbulence UQ | 1A+ | Model-form budget | Gate margin = num_err + turb_UQ + 3σ |
 | Species Conservation | 1B+ | 1e-4 per-species | Per-species + total mass |
@@ -410,7 +422,7 @@ master_seed = hash(challenge_id + block_hash + run_nonce)
 ### Custom Dataset Validation (Miner-Provided)
 
 1. **Mesh quality** + field consistency checks
-2. **Reference solver validation** (sample vs FEniCS/OpenFOAM)
+2. **Reference solver validation** (sample vs FEniCS/OpenFOAM/DifferentialEquations.jl)
 3. **Physics consistency** (conservation laws, BCs)
 3. **Only validated datasets enter training pipeline**
 
@@ -430,39 +442,69 @@ master_seed = hash(challenge_id + block_hash + run_nonce)
 ### PySR Configuration (Phase 0)
 
 ```python
+# carbon/landscape/pysr_config.py
 PYSR_CONFIG = {
-    "populations": 50, "population_size": 100, "ncycles_per_iteration": 500,
-    "maxsize": 40, "maxdepth": 8,
+    "populations": 50,
+    "population_size": 100,
+    "ncycles_per_iteration": 500,
+    "maxsize": 40,
+    "maxdepth": 8,
     "binary_operators": ["+", "-", "*", "/", "^"],
     "unary_operators": ["sin", "cos", "exp", "log", "sqrt", "abs"],
     "constraints": {"pow": (-1, 1)},
-    "feature_names": ["loss_data_weight", "loss_physics_weight", "loss_boundary_weight",
-                       "lr_initial", "lr_decay_rate", "curriculum_phase", "backbone_depth",
-                       "backbone_width", "activation_type", "normalization_type",
-                       "physics_gate_margin", "residual_l2", "conservation_l2", "boundary_l2"],
-    "target_name": "robustness_score", "verbosity": 1,
+    "complexity_of_operators": {"+": 1, "-": 1, "*": 2, "/": 2, "^": 3},
+    "feature_names": [
+        "loss_data_weight", "loss_physics_weight", "loss_boundary_weight",
+        "lr_initial", "lr_decay_rate", "curriculum_phase", "backbone_depth",
+        "backbone_width", "activation_type", "normalization_type",
+        "physics_gate_margin", "residual_l2", "conservation_l2", "boundary_l2"
+    ],
+    "target_name": "robustness_score",
+    "verbosity": 1,
 }
 ```
 
 ### ModelingToolkit.jl Bridge (JSON → JAX Loss Terms)
 
 ```julia
-function json_to_loss_term(json_expr::Dict)
-    @variables x[1:n]  # strategy params
+# carbon/landscape/bridge.jl
+using ModelingToolkit, Symbolics, JSON3
+
+function json_to_loss_term(json_expr::Dict) -> ModelingToolkit.Equation
+    """Convert PySR JSON expression to MT differentiable loss term."""
+    @variables x[1:n]  # strategy parameters
     @parameters p[1:m]  # physics state
+    
+    # Parse PySR expression tree
     expr = parse_pysr_json(json_expr)
-    return eval(build_function(expr, [p...], [t, x, y, z]))
+    
+    # Compile to differentiable function
+    loss_fn = eval(build_function(expr, [p...], [t, x, y, z]))
+    
+    return loss_fn
 end
+
+# Example output: structured loss term
+# L_structured = λ₁ * (∇·u)² + λ₂ * (∂ρ/∂t + ∇·(ρu))² + λ₃ * (∂E/∂t + ∇·(u(E+p)))²
 ```
 
 ### Double ML (Phase 2A+, JAX-Native)
 
 ```python
 DML_CONFIG = {
-    "n_folds": 5, "n_repeats": 3, "ml_model": "jax_boosting",
-    "treatment_types": {"loss_weights": "continuous_multivariate", "curriculum": "categorical"},
+    "n_folds": 5,
+    "n_repeats": 3,
+    "ml_model": "jax_boosting",
+    "treatment_types": {
+        "loss_weights": "continuous_multivariate",
+        "curriculum": "categorical",
+        "backbone": "categorical",
+        "lr_schedule": "categorical"
+    },
     "confounders": ["physics_class", "data_seed", "backbone", "epochs"],
-    "target": "robustness_score", "confidence_level": 0.95,
+    "target": "robustness_score",
+    "confidence_level": 0.95,
+    "min_samples_per_treatment": 50
 }
 ```
 
@@ -516,6 +558,7 @@ class AsyncCarbonMiner:
                     if receipt.accepted: prior = candidate
         return prior
 ```
+
 ---
 
 ## 10. Commercial GTM — Three Revenue Engines
@@ -557,6 +600,7 @@ class AsyncCarbonMiner:
 | Validator ROI at floor | > 0 |
 | Emission efficiency | > 80% |
 
+---
 
 ## 11. Security & Correctness Guarantees
 
