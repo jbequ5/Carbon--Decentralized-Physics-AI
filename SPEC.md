@@ -66,11 +66,9 @@ Carbon operates a **Dual-Regime Model Supply** for defense and regulated domains
 
 ## Commercial GTM — Three Revenue Engines
 
-- **Engine 1 — Specialist Bank (Tier 1)**: Product, pricing ($20-50k/yr per model / $100-200k/yr bundle), buyer (sim teams at Aero/Auto/Energy), motion (self-serve API), differentiation (physics gate certificates), Phase 0 delivery
-- **Engine 2 — Sponsored Challenges (Tiers 2-4)**: Product (custom PDE/geometry challenges), pricing (T2: $150-300k open, T3: $400-800k IP-licensed, T4: $800k-2M+ private/on-prem), buyer (Primes, OEMs, Labs), motion (Challenge Factory CLI, standardized agreements), Phase 1A+ delivery
+- **Engine 1 — Specialist Bank (Tier 1)**: Product, pricing (per model / per bundle), buyer (sim teams at Aero/Auto/Energy), motion (self-serve API), differentiation (physics gate certificates), Phase 0 delivery
+- **Engine 2 — Sponsored Challenges (Tiers 2-4)**: Product (custom PDE/geometry challenges), pricing (T2: $ open, T3: $$ IP-licensed, T4: $$$ private/on-prem), buyer (Primes, OEMs, Labs), motion (Challenge Factory CLI, standardized agreements), Phase 1A+ delivery
 - **Engine 3 — DoD Subcontract (SBIR/BAA)**: Positioning (verification engine for IV&V/ATO), entry vehicle (SBIR via Prime), prime targets (Shield AI, Anduril, EpiSci, Applied Intuition, Kratos), Carbon deliverable (evidence package + ONNX), Prime deliverable (fine-tuned model + ATO), Phase 1B requirement
-- **Engine 4 — Verification Gas/Registry**: Asset (programmatic badge resolution, model card API), metering (USD-denominated, α-settled via Chainlink), pricing ($0.001-0.01/query), partners (Dyad, Ansys, nTop, Rescale), scale (1M queries/mo = $1,500/mo per partner)
-- **Revenue Projections**: Y1: $1.8M (30k Tier1 + $1.2M Challenges), Y2: $5.4M, Y3: $16.6M, Y4: $35.8M (conservative)
 
 ---
 
@@ -81,25 +79,6 @@ The following three capabilities are prioritized for the initial design because 
 ### 1. Black-Box Diagnostics with Clear Diagnostic Tiers (Reputation-Gated)
 
 MCP diagnostics returned to miners and agents will be deliberately limited. Only objective scores, gate pass/fail status, and high-level category feedback will be provided. Precise geometric, spectral, or spatial hotspot information will not be exposed. This is a core architectural decision to protect the hidden stress distribution and prevent reverse-engineering of the validator's evaluation data.
-
-**Diagnostic Tier Definitions (Reputation-Gated, Not Stake-Gated):**
-
-| Tier | Access | Gate | Reputation Threshold |
-|------|--------|------|---------------------|
-| **Basic** | Objective scores + overall gate status + high-level category | Free (all miners) | 0 |
-| **Intermediate** | High-level failure categories (e.g., "long-rollout stability", "shock capturing") + spectral hints + envelope warnings | Reputation ≥ 0.65 | 0.65 |
-| **Rich** | Spatial hotspots + causal snippets + priority queue | Reputation ≥ 0.85 + validator nomination | 0.85 |
-
-**Reputation Score Formula:**
-```
-reputation = 0.4 × gate_pass_rate_30d + 0.3 × challenge_win_rate_90d + 0.2 × consistency_score + 0.1 × recency_weight
-```
-- `gate_pass_rate_30d`: Fraction of submissions passing all gates in last 30 days
-- `challenge_win_rate_90d`: Fraction of challenges where miner held top-3 position in last 90 days
-- `consistency_score`: 1 - (std_dev_of_scores / mean_score) over last 20 submissions
-- `recency_weight`: Exponential decay, half-life = 14 days
-
-Staking reserved for Partners/Enterprises only (see Partner Staking mechanism).
 
 ### 2. Noisy Prior Distribution + Estimation Mode
 
