@@ -1,4 +1,4 @@
-# SPEC.md — Carbon Physics Intelligence Subnet
+# Carbon Physics Intelligence Subnet
 
 ---
 
