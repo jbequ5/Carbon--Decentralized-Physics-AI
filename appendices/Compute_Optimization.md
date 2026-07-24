@@ -1,4 +1,4 @@
-# Updated Document 1: Compute Optimization Strategy (Optimized)
+# Compute Optimization Strategy
 
 ```markdown
 # Compute Optimization Strategy for Carbon
