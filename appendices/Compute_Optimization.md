@@ -1,6 +1,6 @@
 # Compute Optimization Strategy
 
-```markdown
+
 # Compute Optimization Strategy for Carbon
 
 **Carbon PDE Subnet**  
