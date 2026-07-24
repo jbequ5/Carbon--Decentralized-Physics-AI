@@ -1,4 +1,4 @@
-# Appendix: JAX Core Training Optimizations (Validator-Side)
+# JAX Core Training Optimizations (Validator-Side)
 
 **Carbon PDE Subnet**  
 **Version:** 2.0 (July 2026)  
